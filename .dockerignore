@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+tests
+Fr
+models
+README_EQUIPE.md
+readme_tensor_flow_big_data_chatbot_projet_final.md

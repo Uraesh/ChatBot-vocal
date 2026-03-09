@@ -1,0 +1,37 @@
+[project]
+name = "nosql-project-chatbot"
+version = "0.1.0"
+description = "Chatbot vocal asynchrone avec pipeline STT/NLP/TTS"
+readme = "readme_tensor_flow_big_data_chatbot_projet_final.md"
+requires-python = ">=3.10"
+dependencies = [
+  "faster-whisper>=1.1.0",
+  "fastapi>=0.115.0",
+  "pymongo>=4.8.0",
+  "tensorflow>=2.15.0",
+  "transformers>=4.44.0,<5.0.0",
+  "sentencepiece>=0.2.0",
+  "pydantic>=2.9.0",
+  "uvicorn>=0.30.0"
+]
+
+[tool.pylint.main]
+py-version = "3.10"
+jobs = 0
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint.messages_control]
+disable = [
+  "missing-module-docstring",
+  "too-few-public-methods"
+]
+
+[tool.pylint.design]
+max-args = 8
+max-attributes = 12
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

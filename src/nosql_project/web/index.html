@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chatbot vocal IA</title>
+    <style>
+      :root {
+        --bg: #f7f7f8;
+        --panel: #ffffff;
+        --line: #e5e7eb;
+        --text: #111827;
+        --muted: #6b7280;
+        --accent: #10a37f;
+        --danger: #dc2626;
+        --shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .layout {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 250px 1fr;
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--line);
+        background: #f2f3f5;
+        padding: 14px;
+      }
+
+      .brand {
+        font-weight: 700;
+        margin-bottom: 14px;
+      }
+
+      .side-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 10px;
+        box-shadow: var(--shadow);
+        font-size: 13px;
+      }
+
+      .main {
+        display: grid;
+        grid-template-rows: auto 1fr auto auto;
+        min-height: 100vh;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .top-title {
+        font-weight: 600;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 4px 9px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #9ca3af;
+      }
+
+      .status.online .dot {
+        background: #22c55e;
+      }
+
+      .pipeline {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--line);
+        background: #fafafa;
+        flex-wrap: wrap;
+      }
+
+      .chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 12px;
+        color: var(--muted);
+        background: #fff;
+      }
+
+      .chip.running {
+        border-color: #f59e0b;
+        color: #a16207;
+      }
+
+      .chip.done {
+        border-color: #22c55e;
+        color: #166534;
+      }
+
+      .chip.error {
+        border-color: #ef4444;
+        color: #991b1b;
+      }
+
+      .queues {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .messages {
+        overflow-y: auto;
+        padding: 22px 0 28px 0;
+      }
+
+      .message-wrap {
+        padding: 0 22px;
+        margin-bottom: 18px;
+      }
+
+      .message-row {
+        max-width: 900px;
+        margin: 0 auto;
+        display: flex;
+        gap: 10px;
+      }
+
+      .message-row.user {
+        justify-content: flex-end;
+      }
+
+      .avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        background: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+
+      .bubble {
+        max-width: min(78ch, 85vw);
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: #fff;
+        padding: 10px 12px;
+        line-height: 1.45;
+        font-size: 14px;
+        box-shadow: var(--shadow);
+      }
+
+      .message-row.user .bubble {
+        background: #ecfdf5;
+        border-color: #a7f3d0;
+      }
+
+      .message-row.system .bubble {
+        background: #fef2f2;
+        border-color: #fecaca;
+      }
+
+      .meta {
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .composer {
+        border-top: 1px solid var(--line);
+        background: var(--panel);
+        padding: 12px 16px;
+      }
+
+      .composer-inner {
+        max-width: 900px;
+        margin: 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: #fff;
+        padding: 8px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+      }
+
+      #text-input {
+        width: 100%;
+        resize: none;
+        border: none;
+        outline: none;
+        font: inherit;
+        font-size: 14px;
+        line-height: 1.4;
+        padding: 8px;
+        min-height: 44px;
+        max-height: 160px;
+      }
+
+      .actions {
+        display: flex;
+        align-items: end;
+        gap: 8px;
+      }
+
+      .btn {
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+
+      .btn-recording {
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+
+      .voice-panel {
+        border-top: 1px solid var(--line);
+        background: #fafafa;
+        padding: 10px 16px;
+      }
+
+      .voice-inner {
+        max-width: 900px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      #audio-player {
+        width: min(460px, 100%);
+      }
+
+      .logs {
+        max-width: 900px;
+        margin: 0 auto;
+        width: 100%;
+        max-height: 160px;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 8px;
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 12px;
+        color: #374151;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      @media (max-width: 900px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">Chatbot vocal IA</div>
+        <div class="side-card"><strong>Mode:</strong> Chat + Voice</div>
+        <div class="side-card"><strong>UI:</strong> style ChatGPT simplifie</div>
+        <div class="side-card"><strong>Session:</strong> <span id="session-label">...</span></div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="top-title">Conversation</div>
+          <div id="api-status" class="status"><span class="dot"></span>API checking</div>
+        </header>
+
+        <section class="pipeline">
+          <div id="chip-processing" class="chip">Processing</div>
+          <div id="chip-stt" class="chip">STT</div>
+          <div id="chip-nlp" class="chip">NLP</div>
+          <div id="chip-tts" class="chip">TTS</div>
+          <div id="queue-metrics" class="queues">pending:- | aq:- | tq:- | rq:-</div>
+        </section>
+
+        <section id="messages" class="messages"></section>
+
+        <section class="composer">
+          <div class="composer-inner">
+            <textarea id="text-input" placeholder="Ecris un message..."></textarea>
+            <div class="actions">
+              <input id="audio-file" type="file" accept="audio/*" class="hidden" />
+              <button id="upload-btn" class="btn" type="button">Upload</button>
+              <button id="mic-btn" class="btn" type="button">Voice</button>
+              <button id="send-btn" class="btn btn-primary" type="button">Send</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="voice-panel">
+          <div class="voice-inner">
+            <span id="voice-label">Aucun audio selectionne</span>
+            <audio id="audio-player" controls></audio>
+            <button id="export-csv" class="btn" type="button">Export CSV</button>
+            <button id="toggle-logs" class="btn" type="button">Logs</button>
+          </div>
+          <div id="logs" class="logs hidden"></div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const state = {
+        sessionId: "s_" + Math.random().toString(36).slice(2, 10),
+        selectedAudioBlob: null,
+        isRecording: false,
+        recorder: null,
+        mediaStream: null,
+        chunks: [],
+        pipelineTimers: [],
+        logsVisible: false,
+      };
+
+      const dom = {
+        sessionLabel: document.getElementById("session-label"),
+        apiStatus: document.getElementById("api-status"),
+        queueMetrics: document.getElementById("queue-metrics"),
+        messages: document.getElementById("messages"),
+        textInput: document.getElementById("text-input"),
+        sendBtn: document.getElementById("send-btn"),
+        micBtn: document.getElementById("mic-btn"),
+        uploadBtn: document.getElementById("upload-btn"),
+        audioFile: document.getElementById("audio-file"),
+        voiceLabel: document.getElementById("voice-label"),
+        audioPlayer: document.getElementById("audio-player"),
+        logs: document.getElementById("logs"),
+        toggleLogs: document.getElementById("toggle-logs"),
+        exportCsv: document.getElementById("export-csv"),
+        chips: {
+          processing: document.getElementById("chip-processing"),
+          stt: document.getElementById("chip-stt"),
+          nlp: document.getElementById("chip-nlp"),
+          tts: document.getElementById("chip-tts"),
+        },
+      };
+
+      dom.sessionLabel.textContent = state.sessionId;
+
+      function now() {
+        return new Date().toLocaleTimeString("fr-FR");
+      }
+
+      function log(message) {
+        const line = `[${now()}] ${message}`;
+        dom.logs.textContent = `${line}\n${dom.logs.textContent}`.slice(0, 12000);
+      }
+
+      function addMessage(role, text, meta = "") {
+        const wrapper = document.createElement("div");
+        wrapper.className = "message-wrap";
+
+        const row = document.createElement("div");
+        row.className = `message-row ${role}`;
+
+        const avatar = document.createElement("div");
+        avatar.className = "avatar";
+        avatar.textContent = role === "user" ? "YOU" : role === "system" ? "SYS" : "AI";
+
+        const content = document.createElement("div");
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        bubble.textContent = text;
+        content.appendChild(bubble);
+
+        if (meta) {
+          const info = document.createElement("div");
+          info.className = "meta";
+          info.textContent = meta;
+          content.appendChild(info);
+        }
+
+        row.appendChild(avatar);
+        row.appendChild(content);
+        wrapper.appendChild(row);
+        dom.messages.appendChild(wrapper);
+        dom.messages.scrollTop = dom.messages.scrollHeight;
+      }
+
+      function setPipeline(stage, status) {
+        const chip = dom.chips[stage];
+        chip.className = "chip";
+        if (status !== "idle") {
+          chip.classList.add(status);
+        }
+      }
+
+      function resetPipeline() {
+        setPipeline("processing", "idle");
+        setPipeline("stt", "idle");
+        setPipeline("nlp", "idle");
+        setPipeline("tts", "idle");
+      }
+
+      function clearPipelineTimers() {
+        state.pipelineTimers.forEach((id) => clearTimeout(id));
+        state.pipelineTimers = [];
+      }
+
+      function startPipelinePreview(isVoice) {
+        clearPipelineTimers();
+        resetPipeline();
+        setPipeline("processing", "running");
+
+        if (!isVoice) {
+          state.pipelineTimers.push(
+            setTimeout(() => {
+              setPipeline("nlp", "running");
+            }, 120),
+          );
+          return;
+        }
+
+        state.pipelineTimers.push(setTimeout(() => setPipeline("stt", "running"), 100));
+        state.pipelineTimers.push(setTimeout(() => setPipeline("nlp", "running"), 420));
+        state.pipelineTimers.push(setTimeout(() => setPipeline("tts", "running"), 900));
+      }
+
+      function finishPipeline(ok) {
+        if (ok) {
+          ["processing", "stt", "nlp", "tts"].forEach((stage) => {
+            const chip = dom.chips[stage];
+            if (chip.classList.contains("running") || stage === "processing") {
+              setPipeline(stage, "done");
+            }
+          });
+        } else {
+          ["processing", "stt", "nlp", "tts"].forEach((stage) => {
+            const chip = dom.chips[stage];
+            if (chip.classList.contains("running") || stage === "processing") {
+              setPipeline(stage, "error");
+            }
+          });
+        }
+      }
+
+      async function refreshHealth() {
+        try {
+          const response = await fetch("/health");
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          dom.apiStatus.classList.add("online");
+          dom.apiStatus.innerHTML = '<span class="dot"></span>API online';
+          dom.queueMetrics.textContent = `pending:${data.pending_requests} | aq:${data.audio_queue_size} | tq:${data.transcript_queue_size} | rq:${data.response_queue_size}`;
+        } catch (error) {
+          dom.apiStatus.classList.remove("online");
+          dom.apiStatus.innerHTML = '<span class="dot"></span>API offline';
+          log(`health error: ${error}`);
+        }
+      }
+
+      function blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const result = reader.result;
+            if (typeof result !== "string") {
+              reject(new Error("invalid blob"));
+              return;
+            }
+            resolve(result.split(",")[1] || "");
+          };
+          reader.onerror = () => reject(new Error("blob read failed"));
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      async function sendChat() {
+        const text = dom.textInput.value.trim();
+        if (!text) {
+          return;
+        }
+        dom.textInput.value = "";
+        addMessage("user", text, "message texte");
+        startPipelinePreview(false);
+        log(`POST /chat text_len=${text.length}`);
+
+        try {
+          const response = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: state.sessionId, text }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail || `HTTP ${response.status}`);
+          }
+          addMessage("assistant", payload.response, `request_id: ${payload.request_id}`);
+          finishPipeline(true);
+        } catch (error) {
+          addMessage("system", `Erreur /chat: ${error}`);
+          finishPipeline(false);
+          log(`chat error: ${error}`);
+        }
+      }
+
+      async function sendVoiceBlob(blob, label) {
+        addMessage("user", `Audio envoye: ${label}`, "message vocal");
+        startPipelinePreview(true);
+        log(`POST /voice blob_size=${blob.size}`);
+
+        try {
+          const audioBase64 = await blobToBase64(blob);
+          const response = await fetch("/voice", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: state.sessionId,
+              audio_base64: audioBase64,
+            }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail || `HTTP ${response.status}`);
+          }
+
+          addMessage("assistant", payload.text, `request_id: ${payload.request_id}`);
+          finishPipeline(true);
+          if (typeof payload.audio_base64 === "string" && payload.audio_base64.startsWith("UklGR")) {
+            dom.audioPlayer.src = `data:audio/wav;base64,${payload.audio_base64}`;
+            dom.audioPlayer.play().catch(() => {});
+          } else {
+            log("voice response not wav (fallback simple possible)");
+          }
+        } catch (error) {
+          addMessage("system", `Erreur /voice: ${error}`);
+          finishPipeline(false);
+          log(`voice error: ${error}`);
+        }
+      }
+
+      async function toggleMicrophone() {
+        if (state.isRecording) {
+          state.isRecording = false;
+          dom.micBtn.classList.remove("btn-recording");
+          dom.micBtn.textContent = "Voice";
+          if (state.recorder) {
+            state.recorder.stop();
+          }
+          if (state.mediaStream) {
+            state.mediaStream.getTracks().forEach((track) => track.stop());
+          }
+          return;
+        }
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          addMessage("system", "Micro indisponible dans ce navigateur.");
+          return;
+        }
+
+        try {
+          state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          state.chunks = [];
+          state.recorder = new MediaRecorder(state.mediaStream);
+          state.recorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+              state.chunks.push(event.data);
+            }
+          };
+          state.recorder.onstop = async () => {
+            const blob = new Blob(state.chunks, { type: state.chunks[0]?.type || "audio/webm" });
+            dom.voiceLabel.textContent = `Audio micro: ${blob.size} bytes`;
+            await sendVoiceBlob(blob, "microphone");
+          };
+          state.recorder.start();
+          state.isRecording = true;
+          dom.micBtn.classList.add("btn-recording");
+          dom.micBtn.textContent = "Stop";
+          dom.voiceLabel.textContent = "Enregistrement en cours...";
+          log("microphone recording started");
+        } catch (error) {
+          addMessage("system", `Erreur micro: ${error}`);
+        }
+      }
+
+      async function downloadSessionCsv() {
+        const url = `/exports/conversations.csv?session_id=${encodeURIComponent(state.sessionId)}`;
+        log(`GET ${url}`);
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const csvBlob = await response.blob();
+          const objectUrl = URL.createObjectURL(csvBlob);
+          const anchor = document.createElement("a");
+          anchor.href = objectUrl;
+          anchor.download = `conversations_${state.sessionId}.csv`;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          URL.revokeObjectURL(objectUrl);
+        } catch (error) {
+          addMessage("system", `Erreur export CSV: ${error}`);
+          log(`export csv error: ${error}`);
+        }
+      }
+
+      dom.sendBtn.addEventListener("click", sendChat);
+      dom.textInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          sendChat();
+        }
+      });
+
+      dom.uploadBtn.addEventListener("click", () => dom.audioFile.click());
+      dom.audioFile.addEventListener("change", () => {
+        const file = dom.audioFile.files?.[0];
+        if (!file) {
+          return;
+        }
+        state.selectedAudioBlob = file;
+        dom.voiceLabel.textContent = `${file.name} (${file.size} bytes)`;
+        sendVoiceBlob(file, file.name);
+      });
+
+      dom.micBtn.addEventListener("click", toggleMicrophone);
+      dom.exportCsv.addEventListener("click", downloadSessionCsv);
+      dom.toggleLogs.addEventListener("click", () => {
+        state.logsVisible = !state.logsVisible;
+        dom.logs.classList.toggle("hidden", !state.logsVisible);
+      });
+
+      addMessage("assistant", "Bonjour. Je suis pret pour le chat texte et vocal.", "session initialisee");
+      refreshHealth();
+      setInterval(refreshHealth, 4000);
+    </script>
+  </body>
+</html>

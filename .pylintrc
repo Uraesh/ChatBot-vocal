@@ -1,0 +1,15 @@
+[MASTER]
+py-version=3.10
+jobs=0
+
+[FORMAT]
+max-line-length=100
+
+[MESSAGES CONTROL]
+disable=
+    missing-module-docstring,
+    too-few-public-methods
+
+[DESIGN]
+max-args=8
+max-attributes=12
