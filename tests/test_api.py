@@ -52,6 +52,17 @@ def test_chat_endpoint(client: TestClient) -> None:
     assert body["response"]
 
 
+def test_chat_stream_endpoint(client: TestClient) -> None:
+    """Chat stream endpoint should return server-sent events."""
+    response = client.post(
+        "/chat/stream",
+        json={"session_id": "demo-session", "text": "bonjour"},
+    )
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    assert "event: meta" in response.text
+
+
 def test_voice_endpoint_success(client: TestClient) -> None:
     """Voice endpoint should process a valid base64 audio payload."""
     audio_base64 = base64.b64encode(b"bonjour").decode("ascii")

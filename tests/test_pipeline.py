@@ -5,7 +5,43 @@ from __future__ import annotations
 import asyncio
 
 from nosql_project.engines import RuleBasedNlpEngine, SimpleSttEngine, SimpleTtsEngine
-from nosql_project.pipeline import AsyncVoicePipeline
+from nosql_project.pipeline import AsyncVoicePipeline, PipelineError
+
+
+class FailingSttEngine:
+    """STT engine that always fails."""
+
+    async def transcribe(self, audio_bytes: bytes, language: str) -> str:
+        del audio_bytes, language
+        raise RuntimeError("stt failure")
+
+
+class FailingNlpEngine:
+    """NLP engine that always fails."""
+
+    async def generate_reply(self, prompt: str, language: str) -> str:
+        del prompt, language
+        raise RuntimeError("nlp failure")
+
+
+class FailingTtsEngine:
+    """TTS engine that always fails."""
+
+    async def synthesize(self, text: str, language: str) -> bytes:
+        del text, language
+        raise RuntimeError("tts failure")
+
+
+class SlowTtsEngine:
+    """TTS engine that is intentionally slow."""
+
+    def __init__(self, delay_seconds: float) -> None:
+        self.delay_seconds = delay_seconds
+
+    async def synthesize(self, text: str, language: str) -> bytes:
+        del text, language
+        await asyncio.sleep(self.delay_seconds)
+        return b"audio"
 
 
 def test_pipeline_roundtrip() -> None:
@@ -18,12 +54,110 @@ def test_pipeline_roundtrip() -> None:
             tts_engine=SimpleTtsEngine(delay_seconds=0.0),
         )
         await pipeline.start()
-        request_id = await pipeline.submit_audio("session-1", b"bonjour")
-        result = await pipeline.wait_for_result(request_id, timeout_seconds=2.0)
-        await pipeline.stop()
+        try:
+            request_id = await pipeline.submit_audio("session-1", b"bonjour")
+            result = await pipeline.wait_for_result(request_id, timeout_seconds=2.0)
 
-        assert result.request_id == request_id
-        assert result.response_text
-        assert result.audio_bytes
+            assert result.request_id == request_id
+            assert result.response_text
+            assert result.audio_bytes
+        finally:
+            await pipeline.stop()
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_timeout() -> None:
+    """wait_for_result should timeout if a stage is too slow."""
+
+    async def scenario() -> None:
+        pipeline = AsyncVoicePipeline(
+            stt_engine=SimpleSttEngine(delay_seconds=0.0),
+            nlp_engine=RuleBasedNlpEngine(delay_seconds=0.0),
+            tts_engine=SlowTtsEngine(delay_seconds=0.2),
+        )
+        await pipeline.start()
+        try:
+            request_id = await pipeline.submit_audio("session-1", b"bonjour")
+            try:
+                await pipeline.wait_for_result(request_id, timeout_seconds=0.05)
+            except TimeoutError:
+                pass
+            else:
+                raise AssertionError("TimeoutError was not raised.")
+        finally:
+            await pipeline.stop()
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_stt_failure() -> None:
+    """STT failure should surface as PipelineError."""
+
+    async def scenario() -> None:
+        pipeline = AsyncVoicePipeline(
+            stt_engine=FailingSttEngine(),
+            nlp_engine=RuleBasedNlpEngine(delay_seconds=0.0),
+            tts_engine=SimpleTtsEngine(delay_seconds=0.0),
+        )
+        await pipeline.start()
+        try:
+            request_id = await pipeline.submit_audio("session-1", b"bonjour")
+            try:
+                await pipeline.wait_for_result(request_id, timeout_seconds=1.0)
+            except PipelineError:
+                pass
+            else:
+                raise AssertionError("PipelineError was not raised.")
+        finally:
+            await pipeline.stop()
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_nlp_failure() -> None:
+    """NLP failure should surface as PipelineError."""
+
+    async def scenario() -> None:
+        pipeline = AsyncVoicePipeline(
+            stt_engine=SimpleSttEngine(delay_seconds=0.0),
+            nlp_engine=FailingNlpEngine(),
+            tts_engine=SimpleTtsEngine(delay_seconds=0.0),
+        )
+        await pipeline.start()
+        try:
+            request_id = await pipeline.submit_audio("session-1", b"bonjour")
+            try:
+                await pipeline.wait_for_result(request_id, timeout_seconds=1.0)
+            except PipelineError:
+                pass
+            else:
+                raise AssertionError("PipelineError was not raised.")
+        finally:
+            await pipeline.stop()
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_tts_failure() -> None:
+    """TTS failure should surface as PipelineError."""
+
+    async def scenario() -> None:
+        pipeline = AsyncVoicePipeline(
+            stt_engine=SimpleSttEngine(delay_seconds=0.0),
+            nlp_engine=RuleBasedNlpEngine(delay_seconds=0.0),
+            tts_engine=FailingTtsEngine(),
+        )
+        await pipeline.start()
+        try:
+            request_id = await pipeline.submit_audio("session-1", b"bonjour")
+            try:
+                await pipeline.wait_for_result(request_id, timeout_seconds=1.0)
+            except PipelineError:
+                pass
+            else:
+                raise AssertionError("PipelineError was not raised.")
+        finally:
+            await pipeline.stop()
 
     asyncio.run(scenario())

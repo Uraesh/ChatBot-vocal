@@ -17,55 +17,115 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+_PHI3_SYSTEM_PROMPT = (
+    "Tu es un assistant vocal conversationnel francophone sympathique, "
+    "comme Siri ou Google Assistant. "
+    "Reponds TOUJOURS en francais, de facon naturelle et concise (1 a 3 phrases maximum). "
+    "Ne repete jamais la question de l'utilisateur. "
+    "Sois chaleureux et direct."
+)
+
+_KNOWN_INTENTS = {"salutation", "question", "commande", "remerciement", "inconnu"}
+
 
 class SttEngine(Protocol):
     """Contract for speech-to-text engines."""
-
     async def transcribe(self, audio_bytes: bytes, language: str) -> str:
-        """Convert audio bytes to text."""
         raise NotImplementedError
-
 
 class NlpEngine(Protocol):
     """Contract for text generation engines."""
-
     async def generate_reply(self, prompt: str, language: str) -> str:
-        """Generate a reply from text input."""
         raise NotImplementedError
-
 
 class TtsEngine(Protocol):
     """Contract for text-to-speech engines."""
-
     async def synthesize(self, text: str, language: str) -> bytes:
-        """Convert text to audio bytes."""
         raise NotImplementedError
+
+
+def _extract_last_user_message(prompt: str) -> str:
+    lines = prompt.strip().splitlines()
+    for line in reversed(lines):
+        stripped = line.strip()
+        for prefix in ("utilisateur:", "user:"):
+            if stripped.lower().startswith(prefix):
+                candidate = stripped[len(prefix):].strip()
+                if candidate:
+                    return candidate
+    return prompt.strip()
+
+def _echo_ratio(response: str, user_input: str) -> float:
+    r_words = set(response.split())
+    u_words = set(user_input.split())
+    if not u_words:
+        return 0.0
+    return len(r_words & u_words) / len(u_words)
+
+def _sanitize_output(text: str, user_message: str) -> str:
+    cleaned = text.strip()
+    for token in ("<|end|>", "<|assistant|>", "<|user|>", "<|system|>"):
+        cleaned = cleaned.replace(token, "").strip()
+    if not cleaned:
+        return ""
+    user_lower = user_message.strip().lower()
+    lower = cleaned.lower()
+    if user_lower and (lower == user_lower or _echo_ratio(lower, user_lower) > 0.75):
+        return ""
+    return cleaned
+
+def _is_whisper_hallucination(text: str) -> bool:
+    patterns = {
+        "sous-titres réalisés par", "sous-titres par", "merci d'avoir regardé",
+        "abonnez-vous", "transcription automatique", "sous-titrage",
+        "[musique]", "[music]", "(musique)",
+    }
+    return any(p in text.lower().strip() for p in patterns)
+
+def _french_fallback_response(user_message: str) -> str:
+    lower = user_message.lower().strip()
+    if any(w in lower for w in ("bonjour", "salut", "bonsoir", "coucou")):
+        return "Bonjour ! Comment puis-je vous aider ?"
+    if any(w in lower for w in ("comment vas", "ca va", "comment tu vas")):
+        return "Je vais tres bien, merci ! Et vous ?"
+    if "merci" in lower:
+        return "Avec plaisir ! N'hesitez pas si vous avez besoin d'autre chose."
+    if any(w in lower for w in ("qui es-tu", "qui es tu", "qui etes-vous")):
+        return "Je suis un assistant vocal IA construit avec FastAPI, Whisper et Piper."
+    if lower.endswith("?"):
+        return "Bonne question. Pouvez-vous me donner plus de details ?"
+    return "Je vous ecoute. N'hesitez pas a preciser votre demande."
+
+def _intent_to_hint(intent: str) -> str:
+    hints: dict[str, str] = {
+        "salutation":   "L'utilisateur te salue, reponds chaleureusement.",
+        "question":     "L'utilisateur pose une question, reponds precisement.",
+        "commande":     "L'utilisateur donne une instruction, execute-la ou explique.",
+        "remerciement": "L'utilisateur te remercie, reponds avec simplicite.",
+        "inconnu":      "Reponds de facon naturelle et demande des precisions si besoin.",
+    }
+    return hints.get(intent, "")
 
 
 @dataclass(slots=True)
 class SimpleSttEngine:
     """Small mock STT engine for local MVP tests."""
-
     delay_seconds: float = 0.02
 
     async def transcribe(self, audio_bytes: bytes, language: str) -> str:
-        """Decode bytes as UTF-8 and fallback to a canned sentence."""
         del language
         await asyncio.sleep(self.delay_seconds)
         transcript = audio_bytes.decode("utf-8", errors="ignore").strip()
-        if transcript:
-            return transcript
-        return "Je n'ai pas bien entendu."
+        return transcript if transcript else "Je n'ai pas bien entendu."
 
 
 @dataclass(slots=True)
 class WhisperSttEngine:
     """Speech-to-text engine backed by faster-whisper."""
-
-    model_size: str = "small"
+    model_size: str = "base"
     device: str = "cpu"
     compute_type: str = "int8"
-    beam_size: int = 1
+    beam_size: int = 5
     _model: Any | None = field(default=None, init=False, repr=False)
 
     def _ensure_model(self) -> Any:
@@ -74,94 +134,80 @@ class WhisperSttEngine:
         try:
             whisper_module: Any = importlib.import_module("faster_whisper")
         except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "faster-whisper is not installed. Install with "
-                "`python -m pip install faster-whisper`."
-            ) from exc
-
-        whisper_model_class: Any = getattr(whisper_module, "WhisperModel", None)
-        if whisper_model_class is None:
-            raise RuntimeError("WhisperModel is unavailable in faster-whisper.")
-
-        self._model = whisper_model_class(
-            self.model_size,
-            device=self.device,
-            compute_type=self.compute_type,
-        )
-        LOGGER.info(
-            "Loaded STT model: faster-whisper %s (device=%s, compute_type=%s)",
-            self.model_size,
-            self.device,
-            self.compute_type,
-        )
+            raise RuntimeError("pip install faster-whisper") from exc
+        whisper_class: Any = getattr(whisper_module, "WhisperModel", None)
+        if whisper_class is None:
+            raise RuntimeError("WhisperModel introuvable.")
+        self._model = whisper_class(self.model_size, device=self.device, compute_type=self.compute_type)
+        LOGGER.info("STT charge : faster-whisper %s (device=%s)", self.model_size, self.device)
         return self._model
 
     def warmup(self) -> None:
-        """Eagerly load model resources."""
         _ = self._ensure_model()
 
     async def transcribe(self, audio_bytes: bytes, language: str) -> str:
-        """Convert audio bytes to text using faster-whisper."""
         return await asyncio.to_thread(self._transcribe_sync, audio_bytes, language)
 
     def _transcribe_sync(self, audio_bytes: bytes, language: str) -> str:
         model = self._ensure_model()
         if not audio_bytes:
             return "Je n'ai pas bien entendu."
-
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-            tmp_file.write(audio_bytes)
-            temp_path = Path(tmp_file.name)
-
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            temp_path = Path(tmp.name)
         try:
-            language_hint = language.strip().lower() or None
-            segments, _ = model.transcribe(
-                str(temp_path),
-                language=language_hint,
-                beam_size=self.beam_size,
+            lang_code = language.strip().lower()[:2] if language.strip() else "fr"
+            segments, info = model.transcribe(
+                str(temp_path), language=lang_code, beam_size=self.beam_size,
                 vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 300, "speech_pad_ms": 200},
+                condition_on_previous_text=False, temperature=0.0,
             )
-            text_parts: list[str] = []
-            for segment in segments:
-                segment_text = str(getattr(segment, "text", "")).strip()
-                if segment_text:
-                    text_parts.append(segment_text)
-            transcript = " ".join(text_parts).strip()
-            if transcript:
-                return transcript
-            return "Je n'ai pas bien entendu."
+            LOGGER.debug("STT langue=%s prob=%.2f", info.language, info.language_probability)
+            parts: list[str] = [
+                str(getattr(seg, "text", "")).strip() for seg in segments
+                if str(getattr(seg, "text", "")).strip()
+                and not _is_whisper_hallucination(str(getattr(seg, "text", "")))
+            ]
+            transcript = " ".join(parts).strip()
+            return transcript if transcript else "Je n'ai pas bien entendu."
         finally:
             temp_path.unlink(missing_ok=True)
 
 
 @dataclass(slots=True)
 class RuleBasedNlpEngine:
-    """Simple rule-based NLP baseline compatible with CPU-only runtime."""
-
+    """Fallback NLP — réponses déterministes sans modèle IA."""
     delay_seconds: float = 0.02
 
     async def generate_reply(self, prompt: str, language: str) -> str:
-        """Generate a deterministic answer for MVP validation."""
         del language
         await asyncio.sleep(self.delay_seconds)
-        normalized = prompt.lower().strip()
-        if "bonjour" in normalized:
-            return "Bonjour, je suis pret a t'aider."
+        normalized = _extract_last_user_message(prompt).lower().strip()
+        if any(w in normalized for w in ("bonjour", "salut", "bonsoir", "coucou")):
+            return "Bonjour ! Comment puis-je vous aider aujourd'hui ?"
+        if any(w in normalized for w in ("comment vas", "ca va", "comment tu vas")):
+            return "Je vais tres bien, merci ! Et vous ?"
         if "merci" in normalized:
-            return "Avec plaisir."
+            return "Avec plaisir ! N'hesitez pas si vous avez d'autres questions."
+        if any(w in normalized for w in ("qui es-tu", "qui es tu")):
+            return "Je suis un assistant vocal IA construit avec FastAPI, Whisper et Piper."
         if normalized.endswith("?"):
-            return "Question recue. Je traite ta demande en mode asynchrone."
-        return f"Message recu: {prompt}"
+            return "Bonne question ! Pouvez-vous me donner plus de details ?"
+        return "Message bien recu. Comment puis-je vous aider ?"
 
 
 @dataclass(slots=True)
-class TransformersNlpEngine:
-    """NLP engine backed by Hugging Face Transformers text2text generation."""
+class FlanT5NluEngine:
+    """
+    Module NLU Flan-T5 Small (TensorFlow).
+    Etape 1 du pipeline hybride : classification d'intention + reformulation.
+    NE genere PAS la reponse finale — prepare le contexte pour Phi-3.
 
+    pip install "tensorflow>=2.15.0" "transformers>=4.44.0,<5.0.0" sentencepiece tf-keras
+    """
     model_name: str = "google/flan-t5-small"
-    max_new_tokens: int = 80
-    num_beams: int = 2
-    temperature: float = 0.7
+    max_new_tokens: int = 60
     local_files_only: bool = False
     _tokenizer: Any | None = field(default=None, init=False, repr=False)
     _model: Any | None = field(default=None, init=False, repr=False)
@@ -170,283 +216,265 @@ class TransformersNlpEngine:
         if self._tokenizer is not None and self._model is not None:
             return self._tokenizer, self._model
         try:
-            transformers_module: Any = importlib.import_module("transformers")
+            tf_module: Any = importlib.import_module("transformers")
         except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "Transformers is not installed. Install with "
-                "`python -m pip install transformers`."
-            ) from exc
-
-        tokenizer_class: Any = getattr(transformers_module, "AutoTokenizer", None)
-        tf_model_class: Any = getattr(transformers_module, "TFAutoModelForSeq2SeqLM", None)
-        if tokenizer_class is None or tf_model_class is None:
-            raise RuntimeError("Transformers TensorFlow seq2seq API is unavailable.")
-
+            raise RuntimeError("pip install 'transformers>=4.44.0,<5.0.0'") from exc
+        tok_class: Any = getattr(tf_module, "AutoTokenizer", None)
+        model_class: Any = getattr(tf_module, "TFAutoModelForSeq2SeqLM", None)
+        if tok_class is None or model_class is None:
+            raise RuntimeError("API TensorFlow seq2seq introuvable dans transformers.")
         try:
-            self._tokenizer = tokenizer_class.from_pretrained(
-                self.model_name,
-                local_files_only=self.local_files_only,
-            )
-            self._model = tf_model_class.from_pretrained(
-                self.model_name,
-                local_files_only=self.local_files_only,
-                use_safetensors=False,
-            )
+            self._tokenizer = tok_class.from_pretrained(self.model_name, local_files_only=self.local_files_only)
+            self._model = model_class.from_pretrained(self.model_name, local_files_only=self.local_files_only, use_safetensors=False)
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            raise RuntimeError(
-                f"Unable to load TensorFlow model '{self.model_name}': {exc}"
-            ) from exc
-        LOGGER.info("Loaded NLP model: %s", self.model_name)
+            raise RuntimeError(f"Impossible de charger Flan-T5 '{self.model_name}': {exc}") from exc
+        LOGGER.info("Flan-T5 NLU charge : %s", self.model_name)
         return self._tokenizer, self._model
 
     def warmup(self) -> None:
-        """Eagerly load model resources."""
         _ = self._ensure_runtime()
 
-    async def generate_reply(self, prompt: str, language: str) -> str:
-        """Generate a response using an actual sequence-to-sequence model."""
-        return await asyncio.to_thread(self._generate_sync, prompt, language)
-
-    # pylint: disable=too-many-locals
-    def _generate_sync(self, prompt: str, language: str) -> str:
+    def classify_intent(self, user_message: str) -> str:
+        """Classifier l'intention : salutation/question/commande/remerciement/inconnu."""
         tokenizer, model = self._ensure_runtime()
-        framed_prompt = self._build_prompt(prompt, language)
-        do_sample = self.temperature > 0
-        inputs = tokenizer(
-            framed_prompt,
-            return_tensors="tf",
-            truncation=True,
+        prompt = (
+            f"Classifie l'intention de ce message en UN seul mot parmi : "
+            f"salutation, question, commande, remerciement, inconnu.\n"
+            f"Message: {user_message}\nIntention:"
         )
-        generation_kwargs: dict[str, Any] = {
-            "max_new_tokens": self.max_new_tokens,
-            "num_beams": self.num_beams,
-            "do_sample": do_sample,
-            "no_repeat_ngram_size": 3,
-        }
-        if do_sample:
-            generation_kwargs["temperature"] = max(self.temperature, 1e-5)
-        output_ids: Any = model.generate(**inputs, **generation_kwargs)
-        first_pass = self._decode_generated_text(tokenizer, output_ids)
-        cleaned_first_pass = self._sanitize_generated_text(first_pass, prompt)
-        if cleaned_first_pass:
-            return cleaned_first_pass
+        inputs = tokenizer(prompt, return_tensors="tf", truncation=True, max_length=256)
+        output_ids: Any = model.generate(**inputs, max_new_tokens=10, num_beams=2, do_sample=False)
+        raw = tokenizer.decode(output_ids[0], skip_special_tokens=True).strip().lower()
+        for intent in _KNOWN_INTENTS:
+            if intent in raw:
+                return intent
+        return "inconnu"
 
-        retry_prompt = self._build_retry_prompt(prompt, language)
-        retry_inputs = tokenizer(
-            retry_prompt,
-            return_tensors="tf",
-            truncation=True,
+    def reformulate(self, user_message: str) -> str:
+        """Reformuler le message en une phrase claire pour Phi-3."""
+        tokenizer, model = self._ensure_runtime()
+        prompt = (
+            f"Reformule ce message en une phrase francaise claire et complete, "
+            f"sans changer le sens : {user_message}"
         )
-        retry_ids: Any = model.generate(**retry_inputs, **generation_kwargs)
-        second_pass = self._decode_generated_text(tokenizer, retry_ids)
-        cleaned_second_pass = self._sanitize_generated_text(second_pass, prompt)
-        if cleaned_second_pass:
-            return cleaned_second_pass
-
-        prompt_normalized = prompt.strip().lower()
-        if "comment vas" in prompt_normalized:
-            return "Je vais bien, merci. Et toi ?"
-        if "salut" in prompt_normalized or "bonjour" in prompt_normalized:
-            return "Salut, je vais bien. Tu veux parler de quoi ?"
-        return "Je suis la pour aider. Peux-tu preciser ta demande ?"
-
-    @staticmethod
-    def _build_prompt(prompt: str, language: str) -> str:
-        normalized_lang = language.strip().lower()
-        if normalized_lang == "fr":
-            return f"Question: {prompt}\nReponse en francais courte:"
-        return f"Answer naturally to this user message: {prompt}"
-
-    @staticmethod
-    def _build_retry_prompt(prompt: str, language: str) -> str:
-        normalized_lang = language.strip().lower()
-        if normalized_lang == "fr":
-            return f"Utilisateur: {prompt}\nAssistant (une phrase):"
-        return f"Question: {prompt}\nAnswer:"
-
-    @staticmethod
-    def _decode_generated_text(tokenizer: Any, output_ids: Any) -> str:
-        if getattr(output_ids, "shape", (0,))[0] > 0:
-            return tokenizer.decode(
-                output_ids[0],
-                skip_special_tokens=True,
-            ).strip()
-        return ""
-
-    @staticmethod
-    # pylint: disable=too-many-return-statements,too-many-branches
-    def _sanitize_generated_text(generated_text: str, prompt: str) -> str:
-        cleaned = generated_text.strip()
-        if not cleaned:
-            return ""
-        prompt_clean = prompt.strip()
-        prompt_lower = prompt_clean.lower()
-        lower = cleaned.lower()
-
-        markers = (
-            "assistant:",
-            "reponse:",
-            "response:",
-            "answer:",
+        inputs = tokenizer(prompt, return_tensors="tf", truncation=True, max_length=256)
+        output_ids: Any = model.generate(
+            **inputs, max_new_tokens=self.max_new_tokens,
+            num_beams=4, do_sample=False, no_repeat_ngram_size=3,
         )
-        for marker in markers:
-            index = lower.rfind(marker)
-            if index >= 0:
-                candidate = cleaned[index + len(marker) :].strip()
-                if candidate:
-                    cleaned = candidate
-                    lower = cleaned.lower()
-                break
+        raw = tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+        cleaned = _sanitize_output(raw, user_message)
+        return cleaned if cleaned else user_message
 
-        if prompt_lower and lower == prompt_lower:
-            return ""
-        if lower.startswith("reponds "):
-            return ""
-        if "message utilisateur" in lower and prompt_lower in lower:
-            return ""
-        if "question:" in lower and prompt_lower in lower:
-            return ""
-        if "assistant" in lower and prompt_lower in lower:
-            return ""
-        if "utilisateur" in lower and prompt_lower in lower:
-            return ""
-        if "useateur" in lower and prompt_lower in lower:
-            return ""
-        if "francophone" in lower and "repond" in lower:
-            return ""
-        if "reponse en francais" in lower:
-            return ""
-        if "francais courte" in lower:
-            return ""
-        if prompt_lower and lower.startswith(prompt_lower):
-            stripped = cleaned[len(prompt_clean) :].strip(" :-")
-            if not stripped:
-                return ""
-            cleaned = stripped
+    def enrich_context(self, user_message: str) -> dict[str, str]:
+        """Retourner intention + message reformulé — input de Phi-3."""
+        intent = self.classify_intent(user_message)
+        reformulated = self.reformulate(user_message)
+        LOGGER.debug("Flan-T5 : intent=%s reformulated='%s'", intent, reformulated)
+        return {"intent": intent, "reformulated": reformulated}
 
-        return cleaned
+
+@dataclass(slots=True)
+class Phi3NlpEngine:
+    """
+    Moteur de generation conversationnelle Phi-3 Mini (GGUF / llama.cpp).
+    Etape 2 du pipeline hybride : reçoit le contexte enrichi par Flan-T5.
+
+    pip install llama-cpp-python
+    Modele : https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf
+    Fichier : Phi-3-mini-4k-instruct-q4.gguf (~2.2 Go)
+    Variable : NLP_MODEL_PATH=C:/models/Phi-3-mini-4k-instruct-q4.gguf
+    """
+    model_path: str = ""
+    max_new_tokens: int = 400
+    temperature: float = 0.7
+    top_p: float = 0.92
+    top_k: int = 50
+    repeat_penalty: float = 1.1
+    n_ctx: int = 4096
+    n_threads: int = 3
+    _llm: Any | None = field(default=None, init=False, repr=False)
+
+    def _ensure_model(self) -> Any:
+        if self._llm is not None:
+            return self._llm
+        try:
+            llama_module: Any = importlib.import_module("llama_cpp")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("pip install llama-cpp-python") from exc
+        llama_class: Any = getattr(llama_module, "Llama", None)
+        if llama_class is None:
+            raise RuntimeError("Classe Llama introuvable dans llama_cpp.")
+        if self.model_path.strip() and Path(self.model_path).exists():
+            LOGGER.info("Chargement Phi-3 Mini (local) depuis %s ...", self.model_path)
+            self._llm = llama_class(
+                model_path=self.model_path,
+                n_ctx=self.n_ctx,
+                n_threads=self.n_threads,
+                verbose=False,
+            )
+        else:
+            LOGGER.info("Telechargement Phi-3 Mini depuis Hugging Face (~2.2 Go)...")
+            self._llm = llama_class.from_pretrained(
+                repo_id="microsoft/Phi-3-mini-4k-instruct-gguf",
+                filename="Phi-3-mini-4k-instruct-q4.gguf",
+                n_ctx=self.n_ctx,
+                n_threads=self.n_threads,
+                verbose=False,
+            )
+            LOGGER.info("Phi-3 Mini telecharge et mis en cache.")
+        LOGGER.info("Phi-3 Mini pret (n_ctx=%s n_threads=%s)", self.n_ctx, self.n_threads)
+        return self._llm
+
+    def warmup(self) -> None:
+        _ = self._ensure_model()
+
+    def generate(self, intent: str, reformulated_message: str) -> str:
+        """Generer une reponse avec contexte enrichi par Flan-T5."""
+        llm = self._ensure_model()
+        intent_hint = _intent_to_hint(intent)
+        formatted_prompt = (
+            f"<|system|>\n{_PHI3_SYSTEM_PROMPT} {intent_hint}<|end|>\n"
+            f"<|user|>\n{reformulated_message}<|end|>\n"
+            f"<|assistant|>\n"
+        )
+        LOGGER.debug("Phi-3 prompt : %s chars (intent=%s)", len(formatted_prompt), intent)
+        output: Any = llm(
+            formatted_prompt,
+            max_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            top_k=self.top_k,
+            repeat_penalty=self.repeat_penalty,
+            stop=["<|end|>", "<|user|>", "<|system|>", "\n\n\n"],
+            echo=False,
+        )
+        raw: str = output["choices"][0]["text"].strip()
+        cleaned = _sanitize_output(raw, reformulated_message)
+        return cleaned if cleaned else _french_fallback_response(reformulated_message)
+
+
+@dataclass(slots=True)
+class HybridNlpEngine:
+    """
+    Moteur NLP hybride : Flan-T5 (TensorFlow) + Phi-3 Mini (GGUF).
+
+    Flan-T5 comprend bien les instructions → classe l'intention + reformule.
+    Phi-3 parle bien → genere une reponse naturelle et conversationnelle.
+    Resultat : un chatbot qui comprend bien ET qui parle bien.
+    """
+    flan: FlanT5NluEngine = field(default_factory=FlanT5NluEngine)
+    phi3: Phi3NlpEngine = field(default_factory=Phi3NlpEngine)
+
+    def warmup(self) -> None:
+        self.flan.warmup()
+        self.phi3.warmup()
+
+    async def generate_reply(self, prompt: str, language: str) -> str:
+        del language
+        return await asyncio.to_thread(self._generate_sync, prompt)
+
+    def _generate_sync(self, prompt: str) -> str:
+        user_message = _extract_last_user_message(prompt)
+        context = self.flan.enrich_context(user_message)
+        return self.phi3.generate(intent=context["intent"], reformulated_message=context["reformulated"])
 
 
 @dataclass(slots=True)
 class SimpleTtsEngine:
     """Small mock TTS engine serializing text to bytes."""
-
     delay_seconds: float = 0.02
 
     async def synthesize(self, text: str, language: str) -> bytes:
-        """Encode the output text as UTF-8 bytes."""
         await asyncio.sleep(self.delay_seconds)
-        payload = f"[{language}] {text}"
-        return payload.encode("utf-8")
+        return f"[{language}] {text}".encode("utf-8")
 
 
 @dataclass(slots=True)
 class PiperTtsEngine:
     """Text-to-speech engine backed by the Piper CLI."""
-
     executable: str = "piper"
     model_path: str = ""
     speaker_id: int | None = None
 
     def warmup(self) -> None:
-        """Validate executable and model path."""
-        resolved_exec = shutil.which(self.executable)
-        if resolved_exec is None:
-            raise RuntimeError(
-                f"Piper executable not found: {self.executable}. "
-                "Set TTS_PIPER_EXECUTABLE or add piper to PATH."
-            )
+        if shutil.which(self.executable) is None:
+            raise RuntimeError(f"Piper introuvable : {self.executable}.")
         if not self.model_path.strip():
-            raise RuntimeError("TTS_PIPER_MODEL_PATH must be configured.")
+            raise RuntimeError("TTS_PIPER_MODEL_PATH doit etre configure.")
         if not Path(self.model_path).exists():
-            raise RuntimeError(f"Piper model file not found: {self.model_path}")
+            raise RuntimeError(f"Modele Piper introuvable : {self.model_path}")
 
     async def synthesize(self, text: str, language: str) -> bytes:
-        """Generate a wav payload from text using Piper."""
         return await asyncio.to_thread(self._synthesize_sync, text, language)
 
     def _synthesize_sync(self, text: str, language: str) -> bytes:
         del language
         self.warmup()
-        normalized_text = text.strip()
-        if not normalized_text:
+        normalized = text.strip()
+        if not normalized:
             return b""
-
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-            output_path = Path(tmp_file.name)
-
-        command = [
-            self.executable,
-            "--model",
-            self.model_path,
-            "--output_file",
-            str(output_path),
-        ]
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            output_path = Path(tmp.name)
+        command = [self.executable, "--model", self.model_path, "--output_file", str(output_path)]
         if self.speaker_id is not None:
             command.extend(["--speaker", str(self.speaker_id)])
-
         try:
-            completed = subprocess.run(
-                command,
-                input=normalized_text,
-                capture_output=True,
-                text=True,
-                check=False,
-                encoding="utf-8",
-            )
-            if completed.returncode != 0:
-                stderr = completed.stderr.strip()
-                raise RuntimeError(f"Piper synthesis failed: {stderr}")
+            result = subprocess.run(command, input=normalized, capture_output=True, text=True, check=False, encoding="utf-8")
+            if result.returncode != 0:
+                raise RuntimeError(f"Piper a echoue : {result.stderr.strip()}")
             audio_bytes = output_path.read_bytes()
             if not audio_bytes:
-                raise RuntimeError("Piper did not produce any audio output.")
+                raise RuntimeError("Piper n'a produit aucun audio.")
             return audio_bytes
         finally:
             output_path.unlink(missing_ok=True)
 
 
 def create_nlp_engine(settings: "Settings") -> NlpEngine:
-    """Create NLP backend from settings."""
+    """
+    NLP_BACKEND valides :
+      - rule_based : fallback deterministe (aucune dependance)
+      - hybrid     : Flan-T5 (TF) + Phi-3 Mini GGUF  <- recommande
+      - phi3       : Phi-3 Mini seul (sans Flan-T5)
+    """
     backend = settings.nlp_backend.strip().lower()
     if backend == "rule_based":
         return RuleBasedNlpEngine()
-    if backend == "transformers":
-        return TransformersNlpEngine(
-            model_name=settings.nlp_model_name,
-            max_new_tokens=settings.nlp_max_new_tokens,
-            num_beams=settings.nlp_num_beams,
-            temperature=settings.nlp_temperature,
-            local_files_only=settings.nlp_local_files_only,
-        )
-    raise ValueError(f"Unsupported NLP_BACKEND value: {settings.nlp_backend}")
+    if backend == "hybrid":
+        flan = FlanT5NluEngine(model_name=settings.nlp_model_name, local_files_only=settings.nlp_local_files_only)
+        phi3 = Phi3NlpEngine(model_path=settings.nlp_model_path, max_new_tokens=settings.nlp_max_new_tokens, temperature=settings.nlp_temperature, n_threads=settings.nlp_n_threads)
+        return HybridNlpEngine(flan=flan, phi3=phi3)
+    if backend == "phi3":
+        return Phi3NlpEngine(model_path=settings.nlp_model_path, max_new_tokens=settings.nlp_max_new_tokens, temperature=settings.nlp_temperature, n_threads=settings.nlp_n_threads)
+    raise ValueError(f"NLP_BACKEND '{settings.nlp_backend}' non reconnu. Valeurs valides : rule_based, hybrid, phi3")
 
 
 def create_stt_engine(settings: "Settings") -> SttEngine:
-    """Create STT backend from settings."""
     backend = settings.stt_backend.strip().lower()
     if backend == "simple":
         return SimpleSttEngine()
     if backend == "whisper":
-        return WhisperSttEngine(
-            model_size=settings.stt_model_size,
-            device=settings.stt_device,
-            compute_type=settings.stt_compute_type,
-            beam_size=settings.stt_beam_size,
-        )
-    raise ValueError(f"Unsupported STT_BACKEND value: {settings.stt_backend}")
+        return WhisperSttEngine(model_size=settings.stt_model_size, device=settings.stt_device, compute_type=settings.stt_compute_type, beam_size=settings.stt_beam_size)
+    raise ValueError(f"STT_BACKEND '{settings.stt_backend}' non reconnu. Valeurs valides : simple, whisper")
 
 
 def create_tts_engine(settings: "Settings") -> TtsEngine:
-    """Create TTS backend from settings."""
     backend = settings.tts_backend.strip().lower()
     if backend == "simple":
         return SimpleTtsEngine()
     if backend == "piper":
         speaker = settings.tts_piper_speaker_id
-        speaker_id = speaker if speaker >= 0 else None
-        return PiperTtsEngine(
-            executable=settings.tts_piper_executable,
-            model_path=settings.tts_piper_model_path,
-            speaker_id=speaker_id,
-        )
-    raise ValueError(f"Unsupported TTS_BACKEND value: {settings.tts_backend}")
+        return PiperTtsEngine(executable=settings.tts_piper_executable, model_path=settings.tts_piper_model_path, speaker_id=speaker if speaker >= 0 else None)
+    raise ValueError(f"TTS_BACKEND '{settings.tts_backend}' non reconnu. Valeurs valides : simple, piper")
+
+
+if __name__ == "__main__":
+    pass
+    # Exemple de test rapide :
+    # settings = Settings.from_env()
+    # nlp = create_nlp_engine(settings)
+    # nlp.warmup()
+    # prompt = "Utilisateur: Qui es-tu ?"
+    # response = asyncio.run(nlp.generate_reply(prompt, language="fr"))
+    # print("NLP response:", response)  

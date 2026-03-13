@@ -13,13 +13,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import asyncio
 from io import StringIO
+import json
 import logging
 from pathlib import Path
+import hashlib
 import re
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from .config import Settings
 from .engines import (
@@ -30,13 +32,20 @@ from .engines import (
     SimpleTtsEngine,
     SttEngine,
     TtsEngine,
-    TransformersNlpEngine,
+    FlanT5NluEngine,
+    HybridNlpEngine,
+    Phi3NlpEngine,
     create_nlp_engine,
     create_stt_engine,
     create_tts_engine,
     WhisperSttEngine,
 )
 from .mongo_utils import create_interaction_collection
+try:
+    import pymongo as _pymongo
+    _PYMONGO_OK = True
+except ModuleNotFoundError:
+    _PYMONGO_OK = False
 from .pipeline import AsyncVoicePipeline, PipelineError
 from .schemas import ChatRequest, ChatResponse, HealthResponse, VoiceRequest, VoiceResponse
 
@@ -55,6 +64,57 @@ class InteractionRecord:
     channel: str
     user_input: str
     assistant_output: str
+
+
+@dataclass(slots=True)
+class ChatMessage:
+    """Single chat message stored for conversational context."""
+
+    role: str
+    content: str
+    created_at: datetime
+
+
+class ChatHistoryStore:
+    """In-memory chat history store keyed by session id."""
+
+    def __init__(self, max_messages: int = 12) -> None:
+        self._max_messages = max(0, max_messages)
+        self._sessions: dict[str, deque[ChatMessage]] = {}
+        self._lock = asyncio.Lock()
+
+    async def append(self, *, session_id: str, role: str, content: str) -> None:
+        """Append a message for a session."""
+        if self._max_messages <= 0:
+            return
+        normalized = session_id.strip()
+        if not normalized:
+            return
+        message = ChatMessage(
+            role=role.strip().lower() or "user",
+            content=content.strip(),
+            created_at=datetime.now(timezone.utc),
+        )
+        async with self._lock:
+            queue = self._sessions.get(normalized)
+            if queue is None:
+                queue = deque(maxlen=self._max_messages)
+                self._sessions[normalized] = queue
+            queue.append(message)
+
+    async def snapshot(self, *, session_id: str, max_turns: int) -> list[ChatMessage]:
+        """Return a copy of recent messages for a session."""
+        if self._max_messages <= 0 or max_turns <= 0:
+            return []
+        normalized = session_id.strip()
+        if not normalized:
+            return []
+        max_messages = max_turns * 2
+        async with self._lock:
+            queue = self._sessions.get(normalized)
+            if queue is None:
+                return []
+            return list(queue)[-max_messages:]
 
 
 class InteractionStore:
@@ -183,6 +243,72 @@ class MongoInteractionStore:
         await asyncio.to_thread(self._client.close)
 
 
+
+class MongoCacheStore:
+    """Cache MongoDB : stocke les paires (hash_input → réponse texte).
+    Si l'utilisateur pose la même question, la réponse est retournée
+    instantanément sans passer par Phi-3.
+    """
+
+    COLLECTION = "response_cache"
+
+    def __init__(self, *, mongo_uri: str, mongo_database: str, timeout_ms: int) -> None:
+        if not _PYMONGO_OK:
+            raise RuntimeError("pymongo non installé.")
+        import pymongo  # pylint: disable=import-outside-toplevel
+        self._client = pymongo.MongoClient(
+            mongo_uri, serverSelectionTimeoutMS=timeout_ms,
+        )
+        self._col = self._client[mongo_database][self.COLLECTION]
+
+    def warmup(self) -> None:
+        self._client.admin.command("ping")
+        self._col.create_index("input_hash", unique=True)
+        self._col.create_index("hits")
+        LOGGER.info("Cache MongoDB prêt (collection=%s)", self.COLLECTION)
+
+    @staticmethod
+    def _hash(text: str) -> str:
+        return hashlib.sha256(text.strip().lower().encode("utf-8")).hexdigest()
+
+    async def get(self, user_input: str) -> str | None:
+        """Retourner la réponse cachée ou None si absente."""
+        key = self._hash(user_input)
+        result = await asyncio.to_thread(
+            self._col.find_one_and_update,
+            {"input_hash": key},
+            {"$inc": {"hits": 1}},
+        )
+        if result:
+            LOGGER.info("Cache HIT input_hash=%s hits=%s", key[:12], result.get("hits", 0) + 1)
+            return str(result.get("response_text", ""))
+        return None
+
+    async def set(self, user_input: str, response_text: str) -> None:
+        """Stocker une nouvelle entrée dans le cache."""
+        key = self._hash(user_input)
+        doc = {
+            "input_hash": key,
+            "user_input": user_input.strip()[:500],
+            "response_text": response_text.strip(),
+            "cached_at": datetime.now(timezone.utc),
+            "hits": 0,
+        }
+        try:
+            await asyncio.to_thread(
+                self._col.update_one,
+                {"input_hash": key},
+                {"$setOnInsert": doc},
+                upsert=True,
+            )
+            LOGGER.debug("Cache SET input_hash=%s", key[:12])
+        except Exception:  # pylint: disable=broad-exception-caught
+            LOGGER.exception("Cache SET échoué pour input_hash=%s", key[:12])
+
+    async def close(self) -> None:
+        await asyncio.to_thread(self._client.close)
+
+
 def _build_interactions_csv(records: list[InteractionRecord]) -> str:
     """Build CSV content from interaction records."""
     buffer = StringIO()
@@ -211,6 +337,33 @@ def _build_interactions_csv(records: list[InteractionRecord]) -> str:
     return buffer.getvalue()
 
 
+def _build_chat_prompt(
+    history: list[ChatMessage],
+    user_text: str,
+    language: str,
+) -> str:
+    """Build a contextual prompt from prior chat history."""
+    if not history:
+        return user_text
+    lang = language.strip().lower()
+    user_label = "Utilisateur" if lang == "fr" else "User"
+    assistant_label = "Assistant" if lang == "fr" else "Assistant"
+    lines: list[str] = []
+    for message in history:
+        label = user_label if message.role == "user" else assistant_label
+        lines.append(f"{label}: {message.content}")
+    lines.append(f"{user_label}: {user_text}")
+    lines.append(f"{assistant_label}:")
+    return "\n".join(lines)
+
+
+def _chunk_text(text: str, chunk_size: int) -> list[str]:
+    """Split text into small chunks for streaming responses."""
+    if chunk_size <= 0:
+        return [text]
+    return [text[index : index + chunk_size] for index in range(0, len(text), chunk_size)]
+
+
 def _safe_filename_token(value: str) -> str:
     """Normalize arbitrary text to a short filename-safe token."""
     normalized = re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_")
@@ -222,12 +375,17 @@ def _safe_filename_token(value: str) -> str:
 def _build_nlp_engine(settings: Settings) -> NlpEngine:
     try:
         engine = create_nlp_engine(settings)
-        if isinstance(engine, TransformersNlpEngine):
+        if isinstance(engine, (HybridNlpEngine, Phi3NlpEngine, FlanT5NluEngine)):
             engine.warmup()
+        model_ref = (
+            f"flan={settings.nlp_model_name} + phi3={settings.nlp_model_path}"
+            if settings.nlp_backend == "hybrid"
+            else settings.nlp_model_path or settings.nlp_model_name
+        )
         LOGGER.info(
             "NLP backend selected: %s (model=%s)",
             settings.nlp_backend,
-            settings.nlp_model_name,
+            model_ref,
         )
         return engine
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -298,7 +456,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.interactions = InteractionStore(
         max_records=SETTINGS.interactions_memory_max_records
     )
+    application.state.chat_history = ChatHistoryStore(
+        max_messages=max(SETTINGS.chat_history_max_turns * 2, 0)
+    )
     application.state.mongo_interactions = None
+    application.state.cache_store = None
     if SETTINGS.interactions_use_mongo:
         try:
             mongo_store = MongoInteractionStore(
@@ -320,6 +482,19 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                 type(exc).__name__,
                 str(exc).splitlines()[0] if str(exc) else "unknown error",
             )
+    # Cache MongoDB — activé si MongoDB est disponible
+    if SETTINGS.interactions_use_mongo:
+        try:
+            cache = MongoCacheStore(
+                mongo_uri=SETTINGS.mongo_uri,
+                mongo_database=SETTINGS.mongo_database,
+                timeout_ms=SETTINGS.interactions_mongo_timeout_ms,
+            )
+            cache.warmup()
+            application.state.cache_store = cache
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.warning("Cache MongoDB désactivé (%s).", str(exc).splitlines()[0])
+
     stt_engine = _build_stt_engine(SETTINGS)
     tts_engine = _build_tts_engine(SETTINGS)
     application.state.pipeline = AsyncVoicePipeline(
@@ -398,6 +573,22 @@ def _get_interaction_store(request: Request) -> InteractionStore:
     raise HTTPException(status_code=500, detail="Journal des interactions indisponible.")
 
 
+def _get_chat_history_store(request: Request) -> ChatHistoryStore:
+    """Read chat history store instance from app state."""
+    history_store = getattr(request.app.state, "chat_history", None)
+    if isinstance(history_store, ChatHistoryStore):
+        return history_store
+    raise HTTPException(status_code=500, detail="Historique de conversation indisponible.")
+
+
+def _get_cache_store(request: Request) -> "MongoCacheStore | None":
+    """Read optional cache store from app state."""
+    store = getattr(request.app.state, "cache_store", None)
+    if isinstance(store, MongoCacheStore):
+        return store
+    return None
+
+
 def _get_mongo_interaction_store(request: Request) -> MongoInteractionStore | None:
     """Read optional Mongo interaction store instance from app state."""
     mongo_store = getattr(request.app.state, "mongo_interactions", None)
@@ -437,7 +628,10 @@ async def _store_interaction(
                 assistant_output=assistant_output,
             )
         except Exception:  # pylint: disable=broad-exception-caught
-            LOGGER.exception("Failed to persist interaction in Mongo request_id=%s", request_id)
+            LOGGER.exception(
+                "Failed to persist interaction in Mongo request_id=%s",
+                request_id,
+            )
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -496,6 +690,7 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
     nlp_engine = _get_nlp_engine(request)
     interaction_store = _get_interaction_store(request)
     mongo_store = _get_mongo_interaction_store(request)
+    history_store = _get_chat_history_store(request)
     request_id = str(uuid4())
     LOGGER.info(
         "Chat request received request_id=%s session_id=%s text_length=%s",
@@ -503,9 +698,29 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
         payload.session_id,
         len(payload.text),
     )
+    cache_store = _get_cache_store(request)
+    cached_reply = await cache_store.get(payload.text) if cache_store else None
+    if cached_reply:
+        LOGGER.info("Chat cache hit request_id=%s", request_id)
+        await history_store.append(session_id=payload.session_id, role="user", content=payload.text)
+        await history_store.append(session_id=payload.session_id, role="assistant", content=cached_reply)
+        await _store_interaction(
+            interaction_store=interaction_store, mongo_store=mongo_store,
+            request_id=request_id, session_id=payload.session_id,
+            channel="chat_cached", user_input=payload.text, assistant_output=cached_reply,
+        )
+        return ChatResponse(request_id=request_id, response=cached_reply)
     try:
+        if isinstance(nlp_engine, RuleBasedNlpEngine):
+            prompt = payload.text
+        else:
+            history = await history_store.snapshot(
+                session_id=payload.session_id,
+                max_turns=settings.chat_history_max_turns,
+            )
+            prompt = _build_chat_prompt(history, payload.text, settings.default_language)
         reply = await nlp_engine.generate_reply(
-            prompt=payload.text,
+            prompt=prompt,
             language=settings.default_language,
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -517,6 +732,8 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
         request_id,
         len(reply),
     )
+    await history_store.append(session_id=payload.session_id, role="user", content=payload.text)
+    await history_store.append(session_id=payload.session_id, role="assistant", content=reply)
     await _store_interaction(
         interaction_store=interaction_store,
         mongo_store=mongo_store,
@@ -526,7 +743,74 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
         user_input=payload.text,
         assistant_output=reply,
     )
+    if cache_store:
+        await cache_store.set(payload.text, reply)
     return ChatResponse(request_id=request_id, response=reply)
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: Request, payload: ChatRequest) -> StreamingResponse:
+    """Stream a text-only inference response progressively."""
+    settings = _get_settings(request)
+    nlp_engine = _get_nlp_engine(request)
+    interaction_store = _get_interaction_store(request)
+    mongo_store = _get_mongo_interaction_store(request)
+    history_store = _get_chat_history_store(request)
+    request_id = str(uuid4())
+
+    async def event_generator() -> AsyncIterator[str]:
+        LOGGER.info(
+            "Chat stream request received request_id=%s session_id=%s text_length=%s",
+            request_id,
+            payload.session_id,
+            len(payload.text),
+        )
+        meta_payload = json.dumps({"request_id": request_id})
+        yield f"event: meta\ndata: {meta_payload}\n\n"
+        try:
+            if isinstance(nlp_engine, RuleBasedNlpEngine):
+                prompt = payload.text
+            else:
+                history = await history_store.snapshot(
+                    session_id=payload.session_id,
+                    max_turns=settings.chat_history_max_turns,
+                )
+                prompt = _build_chat_prompt(history, payload.text, settings.default_language)
+            reply = await nlp_engine.generate_reply(
+                prompt=prompt,
+                language=settings.default_language,
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.exception("Chat stream generation failed request_id=%s", request_id)
+            error_payload = json.dumps(
+                {"detail": str(exc).splitlines()[0] if str(exc) else "unknown error"}
+            )
+            yield f"event: error\ndata: {error_payload}\n\n"
+            return
+
+        await history_store.append(session_id=payload.session_id, role="user", content=payload.text)
+        await history_store.append(session_id=payload.session_id, role="assistant", content=reply)
+        await _store_interaction(
+            interaction_store=interaction_store,
+            mongo_store=mongo_store,
+            request_id=request_id,
+            session_id=payload.session_id,
+            channel="chat",
+            user_input=payload.text,
+            assistant_output=reply,
+        )
+
+        for chunk in _chunk_text(reply, settings.chat_stream_chunk_chars):
+            yield f"data: {chunk}\n\n"
+
+        done_payload = json.dumps({"request_id": request_id})
+        yield f"event: done\ndata: {done_payload}\n\n"
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
 
 
 @app.post("/voice", response_model=VoiceResponse)
@@ -536,6 +820,7 @@ async def voice(request: Request, payload: VoiceRequest) -> VoiceResponse:
     pipeline = _get_pipeline(request)
     interaction_store = _get_interaction_store(request)
     mongo_store = _get_mongo_interaction_store(request)
+    history_store = _get_chat_history_store(request)
     LOGGER.info(
         "Voice request received session_id=%s audio_base64_length=%s",
         payload.session_id,
@@ -577,6 +862,16 @@ async def voice(request: Request, payload: VoiceRequest) -> VoiceResponse:
         result.request_id,
         len(result.response_text),
         len(result.audio_bytes),
+    )
+    await history_store.append(
+        session_id=result.session_id,
+        role="user",
+        content=result.transcript,
+    )
+    await history_store.append(
+        session_id=result.session_id,
+        role="assistant",
+        content=result.response_text,
     )
     await _store_interaction(
         interaction_store=interaction_store,

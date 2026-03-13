@@ -61,7 +61,7 @@ class ChatRequest(BaseModel):
     """Incoming text chat request."""
 
     session_id: str = Field(min_length=1, max_length=128)
-    text: str = Field(min_length=1, max_length=1000)
+    text: str = Field(min_length=1, max_length=10000)
 
 
 class ChatResponse(BaseModel):
