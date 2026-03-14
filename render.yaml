@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: nosql-voice-chatbot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements-render.txt
+    startCommand: python run_api.py
+    healthCheckPath: /health
+    envVars:
+      - key: NLP_BACKEND
+        value: rule_based
+      - key: STT_BACKEND
+        value: simple
+      - key: TTS_BACKEND
+        value: simple
+      - key: INTERACTIONS_USE_MONGO
+        value: "false"
+      - key: DEFAULT_LANGUAGE
+        value: fr
