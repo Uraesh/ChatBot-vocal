@@ -48,6 +48,11 @@ class Settings:
     nlp_n_threads: int = 3                          # NOUVEAU : threads CPU pour llama.cpp
     nlp_local_files_only: bool = False
     nlp_fallback_to_rule_based: bool = True
+    openrouter_api_key: str = ""
+    openrouter_model: str = ""
+    openrouter_site_url: str = ""
+    openrouter_app_name: str = ""
+    openrouter_timeout_seconds: float = 30.0
 
     # --- STT (Whisper) ---
     stt_backend: str = "simple"
@@ -84,8 +89,10 @@ class Settings:
         stt_beam_size_raw = os.getenv("STT_BEAM_SIZE", "5")
         tts_piper_speaker_id_raw = os.getenv("TTS_PIPER_SPEAKER_ID", "-1")
 
+        app_name = os.getenv("APP_NAME", "NoSQL Async Voice Chatbot")
+        openrouter_timeout_raw = os.getenv("OPENROUTER_TIMEOUT_SECONDS", "30.0")
         return Settings(
-            app_name=os.getenv("APP_NAME", "NoSQL Async Voice Chatbot"),
+            app_name=app_name,
             queue_max_size=int(queue_raw),
             voice_timeout_seconds=float(timeout_raw),
             default_language=os.getenv("DEFAULT_LANGUAGE", "fr"),
@@ -119,6 +126,11 @@ class Settings:
             nlp_fallback_to_rule_based=_as_bool(
                 os.getenv("NLP_FALLBACK_TO_RULE_BASED", "true"), default=True,
             ),
+            openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
+            openrouter_model=os.getenv("OPENROUTER_MODEL", ""),
+            openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", ""),
+            openrouter_app_name=os.getenv("OPENROUTER_APP_NAME", app_name),
+            openrouter_timeout_seconds=float(openrouter_timeout_raw),
             stt_backend=os.getenv("STT_BACKEND", "simple"),
             stt_model_size=os.getenv("STT_MODEL_SIZE", "base"),
             stt_device=os.getenv("STT_DEVICE", "cpu"),

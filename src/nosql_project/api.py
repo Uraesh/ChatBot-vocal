@@ -377,11 +377,12 @@ def _build_nlp_engine(settings: Settings) -> NlpEngine:
         engine = create_nlp_engine(settings)
         if isinstance(engine, (HybridNlpEngine, Phi3NlpEngine, FlanT5NluEngine)):
             engine.warmup()
-        model_ref = (
-            f"flan={settings.nlp_model_name} + phi3={settings.nlp_model_path}"
-            if settings.nlp_backend == "hybrid"
-            else settings.nlp_model_path or settings.nlp_model_name
-        )
+        if settings.nlp_backend == "hybrid":
+            model_ref = f"flan={settings.nlp_model_name} + phi3={settings.nlp_model_path}"
+        elif settings.nlp_backend == "openrouter":
+            model_ref = settings.openrouter_model or "openrouter-default"
+        else:
+            model_ref = settings.nlp_model_path or settings.nlp_model_name
         LOGGER.info(
             "NLP backend selected: %s (model=%s)",
             settings.nlp_backend,

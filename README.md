@@ -42,8 +42,9 @@ Le plan gratuit Render met le service en veille apres inactivite et reste limite
 Steps:
 1. Connecter le repo a Render.
 2. Render detecte `render.yaml` et cree le service.
-3. Verifier que les variables d'env sont en mode leger (rule_based / simple).
-4. Lancer la web app via l'URL Render et tester `/health`.
+3. Renseigner `OPENROUTER_API_KEY` (et `OPENROUTER_MODEL` si besoin) dans Render.
+4. Verifier `NLP_BACKEND=openrouter`, `STT_BACKEND=simple`, `TTS_BACKEND=simple`.
+5. Lancer la web app via l'URL Render et tester `/health`.
 
 ## Modules (format presentation 10-15 min)
 
@@ -65,12 +66,12 @@ Steps:
 - Avantages / limites: schema flexible; pas de validation forte par defaut.
 - Positionnement Big Data: couche stockage NoSQL.
 
-### 3) NLP (TensorFlow + Phi-3)
+### 3) NLP (TensorFlow + Phi-3 / OpenRouter)
 
 - Probleme adresse: produire des reponses conversationnelles en francais.
 - Architecture interne: mode `hybrid` = Flan-T5 (NLU) + Phi-3 (generation).
-- Fonctionnement: `NLP_BACKEND=rule_based|phi3|hybrid`.
-- Cas d'usage (demo): activer `NLP_BACKEND=hybrid` + `NLP_MODEL_PATH`.
+- Fonctionnement: `NLP_BACKEND=rule_based|phi3|hybrid|openrouter`.
+- Cas d'usage (demo): activer `NLP_BACKEND=hybrid` + `NLP_MODEL_PATH` ou `NLP_BACKEND=openrouter` + `OPENROUTER_API_KEY`.
 - Avantages / limites: meilleure qualite en hybride; lourd sur CPU et dependances.
 - Positionnement Big Data: couche IA / inference.
 

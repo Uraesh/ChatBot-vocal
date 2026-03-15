@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import importlib
+import json
 import logging
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -195,6 +198,77 @@ class RuleBasedNlpEngine:
         if normalized.endswith("?"):
             return "Bonne question ! Pouvez-vous me donner plus de details ?"
         return "Message bien recu. Comment puis-je vous aider ?"
+
+
+@dataclass(slots=True)
+class OpenRouterNlpEngine:
+    """Remote NLP via OpenRouter API (chat completions)."""
+    api_key: str
+    model: str = ""
+    site_url: str = ""
+    app_name: str = ""
+    timeout_seconds: float = 30.0
+    max_new_tokens: int = 400
+    temperature: float = 0.7
+
+    async def generate_reply(self, prompt: str, language: str) -> str:
+        return await asyncio.to_thread(self._generate_sync, prompt, language)
+
+    def _generate_sync(self, prompt: str, language: str) -> str:
+        if not self.api_key.strip():
+            raise RuntimeError("OPENROUTER_API_KEY manquant.")
+        user_message = _extract_last_user_message(prompt)
+        system_prompt = _PHI3_SYSTEM_PROMPT
+        if language and language.strip().lower().startswith("en"):
+            system_prompt = (
+                "You are a friendly voice assistant. "
+                "Reply in English, concise (1-3 sentences). "
+                "Never repeat the user's question."
+            )
+        payload: dict[str, Any] = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_new_tokens,
+        }
+        if self.model.strip():
+            payload["model"] = self.model.strip()
+        data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {self.api_key.strip()}",
+            "Content-Type": "application/json",
+        }
+        if self.site_url.strip():
+            headers["HTTP-Referer"] = self.site_url.strip()
+        if self.app_name.strip():
+            headers["X-Title"] = self.app_name.strip()
+        request = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                raw = response.read().decode("utf-8", errors="ignore")
+        except urllib.error.HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="ignore") if exc.fp else str(exc)
+            raise RuntimeError(f"OpenRouter HTTP {exc.code}: {details}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"OpenRouter connection error: {exc.reason}") from exc
+        try:
+            payload_out = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("OpenRouter a retourne une reponse invalide.") from exc
+        message = (
+            payload_out.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        cleaned = _sanitize_output(str(message), user_message)
+        return cleaned if cleaned else _french_fallback_response(user_message)
 
 
 @dataclass(slots=True)
@@ -435,19 +509,33 @@ def create_nlp_engine(settings: "Settings") -> NlpEngine:
     """
     NLP_BACKEND valides :
       - rule_based : fallback deterministe (aucune dependance)
+      - openrouter : LLM distant via OpenRouter API
       - hybrid     : Flan-T5 (TF) + Phi-3 Mini GGUF  <- recommande
       - phi3       : Phi-3 Mini seul (sans Flan-T5)
     """
     backend = settings.nlp_backend.strip().lower()
     if backend == "rule_based":
         return RuleBasedNlpEngine()
+    if backend == "openrouter":
+        return OpenRouterNlpEngine(
+            api_key=settings.openrouter_api_key,
+            model=settings.openrouter_model,
+            site_url=settings.openrouter_site_url,
+            app_name=settings.openrouter_app_name,
+            timeout_seconds=settings.openrouter_timeout_seconds,
+            max_new_tokens=settings.nlp_max_new_tokens,
+            temperature=settings.nlp_temperature,
+        )
     if backend == "hybrid":
         flan = FlanT5NluEngine(model_name=settings.nlp_model_name, local_files_only=settings.nlp_local_files_only)
         phi3 = Phi3NlpEngine(model_path=settings.nlp_model_path, max_new_tokens=settings.nlp_max_new_tokens, temperature=settings.nlp_temperature, n_threads=settings.nlp_n_threads)
         return HybridNlpEngine(flan=flan, phi3=phi3)
     if backend == "phi3":
         return Phi3NlpEngine(model_path=settings.nlp_model_path, max_new_tokens=settings.nlp_max_new_tokens, temperature=settings.nlp_temperature, n_threads=settings.nlp_n_threads)
-    raise ValueError(f"NLP_BACKEND '{settings.nlp_backend}' non reconnu. Valeurs valides : rule_based, hybrid, phi3")
+    raise ValueError(
+        f"NLP_BACKEND '{settings.nlp_backend}' non reconnu. "
+        "Valeurs valides : rule_based, openrouter, hybrid, phi3"
+    )
 
 
 def create_stt_engine(settings: "Settings") -> SttEngine:
