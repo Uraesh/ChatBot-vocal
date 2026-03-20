@@ -32,7 +32,7 @@ class Settings:
     mongo_batch_size: int = 1000
     chat_history_max_turns: int = 6
     chat_stream_chunk_chars: int = 24
-    session_message_limit: int = 50
+    session_message_limit: int = 10000
     interactions_use_mongo: bool = False
     interactions_mongo_collection: str = "interaction_logs"
     interactions_mongo_timeout_ms: int = 5000
@@ -79,7 +79,7 @@ class Settings:
         mongo_batch_raw = os.getenv("MONGO_BATCH_SIZE", "1000")
         chat_history_turns_raw = os.getenv("CHAT_HISTORY_MAX_TURNS", "6")
         chat_stream_chunk_chars_raw = os.getenv("CHAT_STREAM_CHUNK_CHARS", "24")
-        session_message_limit_raw = os.getenv("SESSION_MESSAGE_LIMIT", "50")
+        session_message_limit_raw = os.getenv("SESSION_MESSAGE_LIMIT", "10000")
         interactions_timeout_raw = os.getenv("INTERACTIONS_MONGO_TIMEOUT_MS", "5000")
         interactions_memory_max_records_raw = os.getenv(
             "INTERACTIONS_MEMORY_MAX_RECORDS", "10000",

@@ -17,6 +17,8 @@ services:
         value: "false"
       - key: DEFAULT_LANGUAGE
         value: fr
+      - key: SESSION_MESSAGE_LIMIT
+        value: "10000"
       - key: OPENROUTER_API_KEY
         value: ""
       - key: OPENROUTER_MODEL
