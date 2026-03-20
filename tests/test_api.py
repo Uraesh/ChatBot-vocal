@@ -50,6 +50,9 @@ def test_chat_endpoint(client: TestClient) -> None:
     body = response.json()
     assert body["request_id"]
     assert body["response"]
+    assert body["message_limit"] >= 1
+    assert body["messages_used"] == 1
+    assert body["messages_remaining"] == body["message_limit"] - 1
 
 
 def test_chat_stream_endpoint(client: TestClient) -> None:
@@ -75,8 +78,40 @@ def test_voice_endpoint_success(client: TestClient) -> None:
     assert body["request_id"]
     assert body["text"]
     assert body["transcript"]
+    assert body["messages_used"] == 1
     decoded_audio = base64.b64decode(body["audio_base64"], validate=True)
     assert decoded_audio
+
+
+def test_session_state_and_history(client: TestClient) -> None:
+    """Session endpoints should expose quota and replay recent messages."""
+    session_id = "memory-session"
+
+    state_before = client.get(f"/session/{session_id}")
+    assert state_before.status_code == 200
+    assert state_before.json()["messages_used"] == 0
+
+    response = client.post(
+        "/chat",
+        json={"session_id": session_id, "text": "je suis une femme, bonsoir"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preferred_title"] == "madame"
+
+    state_after = client.get(f"/session/{session_id}")
+    assert state_after.status_code == 200
+    state_payload = state_after.json()
+    assert state_payload["messages_used"] == 1
+    assert state_payload["preferred_title"] == "madame"
+    assert state_payload["suggested_greeting"]
+
+    history_response = client.get(f"/session/{session_id}/history")
+    assert history_response.status_code == 200
+    messages = history_response.json()["messages"]
+    assert len(messages) == 2
+    assert messages[0]["role"] == "user"
+    assert messages[1]["role"] == "assistant"
 
 
 def test_voice_endpoint_invalid_base64(client: TestClient) -> None:

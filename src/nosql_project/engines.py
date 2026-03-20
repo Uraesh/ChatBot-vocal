@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime
 import importlib
 import json
 import logging
@@ -58,6 +59,55 @@ def _extract_last_user_message(prompt: str) -> str:
                     return candidate
     return prompt.strip()
 
+
+def _current_french_greeting() -> str:
+    hour = datetime.now().hour
+    return "Bonsoir" if hour >= 18 or hour < 5 else "Bonjour"
+
+
+def _prompt_to_chat_messages(prompt: str) -> list[dict[str, str]]:
+    role_map = {
+        "system": "system",
+        "systeme": "system",
+        "utilisateur": "user",
+        "user": "user",
+        "assistant": "assistant",
+    }
+    messages: list[dict[str, str]] = []
+    current_role: str | None = None
+    buffer: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_role, buffer
+        content = "\n".join(buffer).strip()
+        if current_role and content:
+            messages.append({"role": current_role, "content": content})
+        current_role = None
+        buffer = []
+
+    for raw_line in prompt.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if buffer:
+                buffer.append("")
+            continue
+        matched = False
+        lowered = line.lower()
+        for prefix, role in role_map.items():
+            token = f"{prefix}:"
+            if lowered.startswith(token):
+                flush()
+                current_role = role
+                buffer.append(line[len(token) :].strip())
+                matched = True
+                break
+        if not matched:
+            if current_role is None:
+                current_role = "user"
+            buffer.append(line)
+    flush()
+    return messages
+
 def _echo_ratio(response: str, user_input: str) -> float:
     r_words = set(response.split())
     u_words = set(user_input.split())
@@ -88,7 +138,7 @@ def _is_whisper_hallucination(text: str) -> bool:
 def _french_fallback_response(user_message: str) -> str:
     lower = user_message.lower().strip()
     if any(w in lower for w in ("bonjour", "salut", "bonsoir", "coucou")):
-        return "Bonjour ! Comment puis-je vous aider ?"
+        return f"{_current_french_greeting()} ! Comment puis-je vous aider ?"
     if any(w in lower for w in ("comment vas", "ca va", "comment tu vas")):
         return "Je vais tres bien, merci ! Et vous ?"
     if "merci" in lower:
@@ -188,7 +238,7 @@ class RuleBasedNlpEngine:
         await asyncio.sleep(self.delay_seconds)
         normalized = _extract_last_user_message(prompt).lower().strip()
         if any(w in normalized for w in ("bonjour", "salut", "bonsoir", "coucou")):
-            return "Bonjour ! Comment puis-je vous aider aujourd'hui ?"
+            return f"{_current_french_greeting()} ! Comment puis-je vous aider aujourd'hui ?"
         if any(w in normalized for w in ("comment vas", "ca va", "comment tu vas")):
             return "Je vais tres bien, merci ! Et vous ?"
         if "merci" in normalized:
@@ -218,6 +268,7 @@ class OpenRouterNlpEngine:
         if not self.api_key.strip():
             raise RuntimeError("OPENROUTER_API_KEY manquant.")
         user_message = _extract_last_user_message(prompt)
+        prompt_messages = _prompt_to_chat_messages(prompt)
         system_prompt = _PHI3_SYSTEM_PROMPT
         if language and language.strip().lower().startswith("en"):
             system_prompt = (
@@ -226,13 +277,12 @@ class OpenRouterNlpEngine:
                 "Never repeat the user's question."
             )
         payload: dict[str, Any] = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": [{"role": "system", "content": system_prompt}, *prompt_messages],
             "temperature": self.temperature,
             "max_tokens": self.max_new_tokens,
         }
+        if not prompt_messages:
+            payload["messages"].append({"role": "user", "content": user_message})
         if self.model.strip():
             payload["model"] = self.model.strip()
         data = json.dumps(payload).encode("utf-8")

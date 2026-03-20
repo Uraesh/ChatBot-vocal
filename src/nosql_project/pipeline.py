@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import logging
 from time import perf_counter
@@ -38,12 +39,14 @@ class AsyncVoicePipeline:
         *,
         language: str = "fr",
         queue_max_size: int = 128,
+        prompt_builder: Callable[[str, str], Awaitable[str]] | None = None,
     ) -> None:
         self._stt_engine = stt_engine
         self._nlp_engine = nlp_engine
         self._tts_engine = tts_engine
         self._language = language
         self._queue_max_size = queue_max_size
+        self._prompt_builder = prompt_builder
 
         self._audio_queue: asyncio.Queue[AudioTask] = asyncio.Queue(maxsize=queue_max_size)
         self._transcript_queue: asyncio.Queue[TranscriptTask] = asyncio.Queue(
@@ -194,8 +197,11 @@ class AsyncVoicePipeline:
         while True:
             task = await self._transcript_queue.get()
             try:
+                prompt = task.transcript
+                if self._prompt_builder is not None:
+                    prompt = await self._prompt_builder(task.session_id, task.transcript)
                 response_text = await self._nlp_engine.generate_reply(
-                    task.transcript,
+                    prompt,
                     self._language,
                 )
                 await self._response_queue.put(

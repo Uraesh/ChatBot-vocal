@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import base64
 import binascii
@@ -47,7 +47,16 @@ try:
 except ModuleNotFoundError:
     _PYMONGO_OK = False
 from .pipeline import AsyncVoicePipeline, PipelineError
-from .schemas import ChatRequest, ChatResponse, HealthResponse, VoiceRequest, VoiceResponse
+from .schemas import (
+    ChatRequest,
+    ChatResponse,
+    ConversationHistoryResponse,
+    ConversationMessageResponse,
+    HealthResponse,
+    SessionStateResponse,
+    VoiceRequest,
+    VoiceResponse,
+)
 
 LOGGER = logging.getLogger(__name__)
 SETTINGS = Settings.from_env()
@@ -73,6 +82,61 @@ class ChatMessage:
     role: str
     content: str
     created_at: datetime
+
+
+@dataclass(slots=True)
+class SessionSnapshot:
+    """Serializable session state returned to the UI and handlers."""
+
+    session_id: str
+    message_limit: int
+    messages_used: int
+    messages_remaining: int
+    preferred_title: str | None = None
+
+
+@dataclass(slots=True)
+class SessionProfile:
+    """Small in-memory profile used for quota and explicit address preference."""
+
+    session_id: str
+    messages_used: int = 0
+    preferred_title: str | None = None
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class MessageLimitExceeded(RuntimeError):
+    """Raised when a session reached its allowed number of user messages."""
+
+
+def _detect_preferred_title(user_text: str) -> str | None:
+    normalized = user_text.strip().lower()
+    feminine_markers = (
+        "je suis une femme",
+        "je suis femme",
+        "je suis une fille",
+        "appelez-moi madame",
+        "tu peux m'appeler madame",
+        "je suis madame",
+    )
+    masculine_markers = (
+        "je suis un homme",
+        "je suis homme",
+        "je suis un garcon",
+        "appelez-moi monsieur",
+        "tu peux m'appeler monsieur",
+        "je suis monsieur",
+    )
+    if any(marker in normalized for marker in feminine_markers):
+        return "madame"
+    if any(marker in normalized for marker in masculine_markers):
+        return "monsieur"
+    return None
+
+
+def _suggested_greeting() -> str:
+    hour = datetime.now().hour
+    return "Bonsoir" if hour >= 18 or hour < 5 else "Bonjour"
 
 
 class ChatHistoryStore:
@@ -115,6 +179,88 @@ class ChatHistoryStore:
             if queue is None:
                 return []
             return list(queue)[-max_messages:]
+
+
+class SessionStateStore:
+    """In-memory session state: quota and explicit addressing preference."""
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, SessionProfile] = {}
+        self._lock = asyncio.Lock()
+
+    async def snapshot(self, *, session_id: str, message_limit: int) -> SessionSnapshot:
+        """Return current session counters and preference."""
+        normalized = session_id.strip()
+        async with self._lock:
+            profile = self._sessions.get(normalized)
+            used = profile.messages_used if profile else 0
+            preferred_title = profile.preferred_title if profile else None
+        return SessionSnapshot(
+            session_id=normalized,
+            message_limit=message_limit,
+            messages_used=used,
+            messages_remaining=max(message_limit - used, 0),
+            preferred_title=preferred_title,
+        )
+
+    async def assert_can_send(self, *, session_id: str, message_limit: int) -> None:
+        """Raise if the session already consumed its allowed user messages."""
+        snapshot = await self.snapshot(session_id=session_id, message_limit=message_limit)
+        if snapshot.messages_used >= snapshot.message_limit:
+            raise MessageLimitExceeded("Limite de messages atteinte pour cette session.")
+
+    async def remember_text_hint(self, *, session_id: str, user_text: str) -> SessionSnapshot:
+        """Update explicit title preference without consuming quota."""
+        normalized = session_id.strip()
+        inferred_title = _detect_preferred_title(user_text)
+        async with self._lock:
+            profile = self._sessions.get(normalized)
+            if profile is None:
+                profile = SessionProfile(session_id=normalized)
+                self._sessions[normalized] = profile
+            if inferred_title is not None:
+                profile.preferred_title = inferred_title
+            profile.updated_at = datetime.now(timezone.utc)
+            used = profile.messages_used
+            preferred_title = profile.preferred_title
+        return SessionSnapshot(
+            session_id=normalized,
+            message_limit=0,
+            messages_used=used,
+            messages_remaining=0,
+            preferred_title=preferred_title,
+        )
+
+    async def register_completed_message(
+        self,
+        *,
+        session_id: str,
+        user_text: str,
+        message_limit: int,
+    ) -> SessionSnapshot:
+        """Consume one user message after a successful round trip."""
+        normalized = session_id.strip()
+        inferred_title = _detect_preferred_title(user_text)
+        async with self._lock:
+            profile = self._sessions.get(normalized)
+            if profile is None:
+                profile = SessionProfile(session_id=normalized)
+                self._sessions[normalized] = profile
+            if inferred_title is not None:
+                profile.preferred_title = inferred_title
+            if profile.messages_used >= message_limit:
+                raise MessageLimitExceeded("Limite de messages atteinte pour cette session.")
+            profile.messages_used += 1
+            profile.updated_at = datetime.now(timezone.utc)
+            used = profile.messages_used
+            preferred_title = profile.preferred_title
+        return SessionSnapshot(
+            session_id=normalized,
+            message_limit=message_limit,
+            messages_used=used,
+            messages_remaining=max(message_limit - used, 0),
+            preferred_title=preferred_title,
+        )
 
 
 class InteractionStore:
@@ -341,18 +487,30 @@ def _build_chat_prompt(
     history: list[ChatMessage],
     user_text: str,
     language: str,
+    *,
+    preferred_title: str | None = None,
 ) -> str:
     """Build a contextual prompt from prior chat history."""
-    if not history:
-        return user_text
     lang = language.strip().lower()
     user_label = "Utilisateur" if lang == "fr" else "User"
     assistant_label = "Assistant" if lang == "fr" else "Assistant"
     lines: list[str] = []
+    greeting = _suggested_greeting()
+    if lang == "fr":
+        system_parts = [
+            f"Si une salutation est naturelle, prefere '{greeting}'.",
+            "N'invente jamais le genre de l'utilisateur.",
+        ]
+        if preferred_title:
+            system_parts.append(
+                f"L'utilisateur a explicitement indique preferer l'appelation '{preferred_title}'."
+            )
+        lines.append(f"System: {' '.join(system_parts)}")
     for message in history:
         label = user_label if message.role == "user" else assistant_label
-        lines.append(f"{label}: {message.content}")
-    lines.append(f"{user_label}: {user_text}")
+        compact_content = " ".join(message.content.splitlines()).strip()
+        lines.append(f"{label}: {compact_content}")
+    lines.append(f"{user_label}: {' '.join(user_text.splitlines()).strip()}")
     lines.append(f"{assistant_label}:")
     return "\n".join(lines)
 
@@ -370,6 +528,18 @@ def _safe_filename_token(value: str) -> str:
     if not normalized:
         return "session"
     return normalized[:64]
+
+
+def _to_session_state_response(snapshot: SessionSnapshot) -> SessionStateResponse:
+    """Convert internal session snapshot to API response model."""
+    return SessionStateResponse(
+        session_id=snapshot.session_id,
+        message_limit=snapshot.message_limit,
+        messages_used=snapshot.messages_used,
+        messages_remaining=snapshot.messages_remaining,
+        preferred_title=snapshot.preferred_title,
+        suggested_greeting=_suggested_greeting(),
+    )
 
 
 def _build_nlp_engine(settings: Settings) -> NlpEngine:
@@ -454,6 +624,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Create and dispose runtime components for each app lifecycle."""
     application.state.settings = SETTINGS
     application.state.nlp_engine = _build_nlp_engine(SETTINGS)
+    application.state.session_state = SessionStateStore()
     application.state.interactions = InteractionStore(
         max_records=SETTINGS.interactions_memory_max_records
     )
@@ -498,12 +669,33 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
     stt_engine = _build_stt_engine(SETTINGS)
     tts_engine = _build_tts_engine(SETTINGS)
+
+    async def build_session_prompt(session_id: str, user_text: str) -> str:
+        history_store: ChatHistoryStore = application.state.chat_history
+        session_store: SessionStateStore = application.state.session_state
+        await session_store.remember_text_hint(session_id=session_id, user_text=user_text)
+        history = await history_store.snapshot(
+            session_id=session_id,
+            max_turns=SETTINGS.chat_history_max_turns,
+        )
+        snapshot = await session_store.snapshot(
+            session_id=session_id,
+            message_limit=SETTINGS.session_message_limit,
+        )
+        return _build_chat_prompt(
+            history,
+            user_text,
+            SETTINGS.default_language,
+            preferred_title=snapshot.preferred_title,
+        )
+
     application.state.pipeline = AsyncVoicePipeline(
         stt_engine=stt_engine,
         nlp_engine=application.state.nlp_engine,
         tts_engine=tts_engine,
         language=SETTINGS.default_language,
         queue_max_size=SETTINGS.queue_max_size,
+        prompt_builder=build_session_prompt,
     )
     pipeline: AsyncVoicePipeline = application.state.pipeline
     try:
@@ -580,6 +772,14 @@ def _get_chat_history_store(request: Request) -> ChatHistoryStore:
     if isinstance(history_store, ChatHistoryStore):
         return history_store
     raise HTTPException(status_code=500, detail="Historique de conversation indisponible.")
+
+
+def _get_session_state_store(request: Request) -> SessionStateStore:
+    """Read session state store instance from app state."""
+    session_store = getattr(request.app.state, "session_state", None)
+    if isinstance(session_store, SessionStateStore):
+        return session_store
+    raise HTTPException(status_code=500, detail="Etat de session indisponible.")
 
 
 def _get_cache_store(request: Request) -> "MongoCacheStore | None":
@@ -660,6 +860,40 @@ async def health(request: Request) -> HealthResponse:
     return response
 
 
+@app.get("/session/{session_id}", response_model=SessionStateResponse)
+async def session_state(request: Request, session_id: str) -> SessionStateResponse:
+    """Expose quota and personalization data for the active browser session."""
+    settings = _get_settings(request)
+    session_store = _get_session_state_store(request)
+    snapshot = await session_store.snapshot(
+        session_id=session_id,
+        message_limit=settings.session_message_limit,
+    )
+    return _to_session_state_response(snapshot)
+
+
+@app.get("/session/{session_id}/history", response_model=ConversationHistoryResponse)
+async def session_history(request: Request, session_id: str) -> ConversationHistoryResponse:
+    """Restore the recent conversation for the current session."""
+    settings = _get_settings(request)
+    history_store = _get_chat_history_store(request)
+    history = await history_store.snapshot(
+        session_id=session_id,
+        max_turns=settings.chat_history_max_turns,
+    )
+    return ConversationHistoryResponse(
+        session_id=session_id,
+        messages=[
+            ConversationMessageResponse(
+                role=message.role,
+                content=message.content,
+                created_at=message.created_at,
+            )
+            for message in history
+        ],
+    )
+
+
 @app.get("/exports/conversations.csv")
 async def export_conversations_csv(
     request: Request,
@@ -692,6 +926,7 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
     interaction_store = _get_interaction_store(request)
     mongo_store = _get_mongo_interaction_store(request)
     history_store = _get_chat_history_store(request)
+    session_store = _get_session_state_store(request)
     request_id = str(uuid4())
     LOGGER.info(
         "Chat request received request_id=%s session_id=%s text_length=%s",
@@ -699,18 +934,42 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
         payload.session_id,
         len(payload.text),
     )
+    try:
+        await session_store.assert_can_send(
+            session_id=payload.session_id,
+            message_limit=settings.session_message_limit,
+        )
+    except MessageLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+    preview_snapshot = await session_store.remember_text_hint(
+        session_id=payload.session_id,
+        user_text=payload.text,
+    )
     cache_store = _get_cache_store(request)
     cached_reply = await cache_store.get(payload.text) if cache_store else None
     if cached_reply:
         LOGGER.info("Chat cache hit request_id=%s", request_id)
         await history_store.append(session_id=payload.session_id, role="user", content=payload.text)
         await history_store.append(session_id=payload.session_id, role="assistant", content=cached_reply)
+        session_snapshot = await session_store.register_completed_message(
+            session_id=payload.session_id,
+            user_text=payload.text,
+            message_limit=settings.session_message_limit,
+        )
         await _store_interaction(
             interaction_store=interaction_store, mongo_store=mongo_store,
             request_id=request_id, session_id=payload.session_id,
             channel="chat_cached", user_input=payload.text, assistant_output=cached_reply,
         )
-        return ChatResponse(request_id=request_id, response=cached_reply)
+        return ChatResponse(
+            request_id=request_id,
+            response=cached_reply,
+            message_limit=session_snapshot.message_limit,
+            messages_used=session_snapshot.messages_used,
+            messages_remaining=session_snapshot.messages_remaining,
+            preferred_title=session_snapshot.preferred_title,
+        )
     try:
         if isinstance(nlp_engine, RuleBasedNlpEngine):
             prompt = payload.text
@@ -719,7 +978,12 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
                 session_id=payload.session_id,
                 max_turns=settings.chat_history_max_turns,
             )
-            prompt = _build_chat_prompt(history, payload.text, settings.default_language)
+            prompt = _build_chat_prompt(
+                history,
+                payload.text,
+                settings.default_language,
+                preferred_title=preview_snapshot.preferred_title,
+            )
         reply = await nlp_engine.generate_reply(
             prompt=prompt,
             language=settings.default_language,
@@ -735,6 +999,11 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
     )
     await history_store.append(session_id=payload.session_id, role="user", content=payload.text)
     await history_store.append(session_id=payload.session_id, role="assistant", content=reply)
+    session_snapshot = await session_store.register_completed_message(
+        session_id=payload.session_id,
+        user_text=payload.text,
+        message_limit=settings.session_message_limit,
+    )
     await _store_interaction(
         interaction_store=interaction_store,
         mongo_store=mongo_store,
@@ -746,7 +1015,14 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
     )
     if cache_store:
         await cache_store.set(payload.text, reply)
-    return ChatResponse(request_id=request_id, response=reply)
+    return ChatResponse(
+        request_id=request_id,
+        response=reply,
+        message_limit=session_snapshot.message_limit,
+        messages_used=session_snapshot.messages_used,
+        messages_remaining=session_snapshot.messages_remaining,
+        preferred_title=session_snapshot.preferred_title,
+    )
 
 
 @app.post("/chat/stream")
@@ -757,6 +1033,7 @@ async def chat_stream(request: Request, payload: ChatRequest) -> StreamingRespon
     interaction_store = _get_interaction_store(request)
     mongo_store = _get_mongo_interaction_store(request)
     history_store = _get_chat_history_store(request)
+    session_store = _get_session_state_store(request)
     request_id = str(uuid4())
 
     async def event_generator() -> AsyncIterator[str]:
@@ -769,6 +1046,14 @@ async def chat_stream(request: Request, payload: ChatRequest) -> StreamingRespon
         meta_payload = json.dumps({"request_id": request_id})
         yield f"event: meta\ndata: {meta_payload}\n\n"
         try:
+            await session_store.assert_can_send(
+                session_id=payload.session_id,
+                message_limit=settings.session_message_limit,
+            )
+            preview_snapshot = await session_store.remember_text_hint(
+                session_id=payload.session_id,
+                user_text=payload.text,
+            )
             if isinstance(nlp_engine, RuleBasedNlpEngine):
                 prompt = payload.text
             else:
@@ -776,11 +1061,20 @@ async def chat_stream(request: Request, payload: ChatRequest) -> StreamingRespon
                     session_id=payload.session_id,
                     max_turns=settings.chat_history_max_turns,
                 )
-                prompt = _build_chat_prompt(history, payload.text, settings.default_language)
+                prompt = _build_chat_prompt(
+                    history,
+                    payload.text,
+                    settings.default_language,
+                    preferred_title=preview_snapshot.preferred_title,
+                )
             reply = await nlp_engine.generate_reply(
                 prompt=prompt,
                 language=settings.default_language,
             )
+        except MessageLimitExceeded as exc:
+            error_payload = json.dumps({"detail": str(exc)})
+            yield f"event: error\ndata: {error_payload}\n\n"
+            return
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.exception("Chat stream generation failed request_id=%s", request_id)
             error_payload = json.dumps(
@@ -791,6 +1085,11 @@ async def chat_stream(request: Request, payload: ChatRequest) -> StreamingRespon
 
         await history_store.append(session_id=payload.session_id, role="user", content=payload.text)
         await history_store.append(session_id=payload.session_id, role="assistant", content=reply)
+        await session_store.register_completed_message(
+            session_id=payload.session_id,
+            user_text=payload.text,
+            message_limit=settings.session_message_limit,
+        )
         await _store_interaction(
             interaction_store=interaction_store,
             mongo_store=mongo_store,
@@ -822,6 +1121,7 @@ async def voice(request: Request, payload: VoiceRequest) -> VoiceResponse:
     interaction_store = _get_interaction_store(request)
     mongo_store = _get_mongo_interaction_store(request)
     history_store = _get_chat_history_store(request)
+    session_store = _get_session_state_store(request)
     LOGGER.info(
         "Voice request received session_id=%s audio_base64_length=%s",
         payload.session_id,
@@ -836,6 +1136,14 @@ async def voice(request: Request, payload: VoiceRequest) -> VoiceResponse:
     if not audio_bytes:
         LOGGER.warning("Voice request empty decoded audio session_id=%s", payload.session_id)
         raise HTTPException(status_code=400, detail="audio vide.")
+
+    try:
+        await session_store.assert_can_send(
+            session_id=payload.session_id,
+            message_limit=settings.session_message_limit,
+        )
+    except MessageLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
 
     request_id = "n/a"
     try:
@@ -874,6 +1182,11 @@ async def voice(request: Request, payload: VoiceRequest) -> VoiceResponse:
         role="assistant",
         content=result.response_text,
     )
+    session_snapshot = await session_store.register_completed_message(
+        session_id=result.session_id,
+        user_text=result.transcript,
+        message_limit=settings.session_message_limit,
+    )
     await _store_interaction(
         interaction_store=interaction_store,
         mongo_store=mongo_store,
@@ -888,4 +1201,8 @@ async def voice(request: Request, payload: VoiceRequest) -> VoiceResponse:
         text=result.response_text,
         audio_base64=encoded_audio,
         transcript=result.transcript,
+        message_limit=session_snapshot.message_limit,
+        messages_used=session_snapshot.messages_used,
+        messages_remaining=session_snapshot.messages_remaining,
+        preferred_title=session_snapshot.preferred_title,
     )

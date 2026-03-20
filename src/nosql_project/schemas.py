@@ -69,6 +69,10 @@ class ChatResponse(BaseModel):
 
     request_id: str
     response: str
+    message_limit: int
+    messages_used: int
+    messages_remaining: int
+    preferred_title: str | None = None
 
 
 class VoiceRequest(BaseModel):
@@ -85,6 +89,10 @@ class VoiceResponse(BaseModel):
     text: str
     audio_base64: str
     transcript: str | None = None
+    message_limit: int
+    messages_used: int
+    messages_remaining: int
+    preferred_title: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -95,3 +103,29 @@ class HealthResponse(BaseModel):
     audio_queue_size: int
     transcript_queue_size: int
     response_queue_size: int
+
+
+class SessionStateResponse(BaseModel):
+    """Session quota and personalization state exposed to the UI."""
+
+    session_id: str
+    message_limit: int
+    messages_used: int
+    messages_remaining: int
+    preferred_title: str | None = None
+    suggested_greeting: str
+
+
+class ConversationMessageResponse(BaseModel):
+    """Single message restored in the UI conversation history."""
+
+    role: str
+    content: str
+    created_at: datetime
+
+
+class ConversationHistoryResponse(BaseModel):
+    """Recent session messages restored after page reload."""
+
+    session_id: str
+    messages: list[ConversationMessageResponse]

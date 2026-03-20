@@ -67,6 +67,42 @@ def test_pipeline_roundtrip() -> None:
     asyncio.run(scenario())
 
 
+def test_pipeline_uses_prompt_builder() -> None:
+    """The pipeline should allow injecting session-aware prompt building."""
+
+    class RecordingNlpEngine:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def generate_reply(self, prompt: str, language: str) -> str:
+            del language
+            self.prompts.append(prompt)
+            return "ok"
+
+    async def scenario() -> None:
+        recorder = RecordingNlpEngine()
+
+        async def prompt_builder(session_id: str, transcript: str) -> str:
+            return f"Utilisateur: {session_id}\nAssistant: memo\nUtilisateur: {transcript}\nAssistant:"
+
+        pipeline = AsyncVoicePipeline(
+            stt_engine=SimpleSttEngine(delay_seconds=0.0),
+            nlp_engine=recorder,
+            tts_engine=SimpleTtsEngine(delay_seconds=0.0),
+            prompt_builder=prompt_builder,
+        )
+        await pipeline.start()
+        try:
+            request_id = await pipeline.submit_audio("session-42", b"bonjour")
+            await pipeline.wait_for_result(request_id, timeout_seconds=2.0)
+            assert recorder.prompts
+            assert "session-42" in recorder.prompts[0]
+        finally:
+            await pipeline.stop()
+
+    asyncio.run(scenario())
+
+
 def test_pipeline_timeout() -> None:
     """wait_for_result should timeout if a stage is too slow."""
 

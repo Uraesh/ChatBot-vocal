@@ -29,38 +29,36 @@
   --error-bg:rgba(192,57,43,.08);--error-border:rgba(192,57,43,.2);--error-text:#b33b3b;
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;font-weight:300;overflow:hidden}
-
-/* Layout */
-.app{display:grid;grid-template-rows:56px 1fr auto;height:100vh;max-width:700px;margin:0 auto;padding:0 18px}
-
-/* Header */
+.app{display:grid;grid-template-rows:56px 1fr auto;height:100vh;max-width:720px;margin:0 auto;padding:0 18px}
 header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
 .brand{font-family:'Instrument Serif',serif;font-size:1.15rem;letter-spacing:.01em}
 .brand em{color:var(--accent);font-style:italic}
-.header-actions{display:flex;align-items:center;gap:10px}
-.theme-toggle{border:1px solid var(--border2);background:transparent;color:var(--text);padding:6px 10px;border-radius:999px;font-size:.72rem;letter-spacing:.04em;cursor:pointer;transition:border-color .2s,transform .12s}
-.theme-toggle:hover{border-color:var(--accent);transform:translateY(-1px)}
-.theme-toggle:active{transform:translateY(0)}
+.header-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.session-badge,.memory-badge{
+  border:1px solid var(--border2);border-radius:999px;padding:6px 10px;
+  font-size:.7rem;letter-spacing:.04em;color:var(--muted);white-space:nowrap
+}
+.memory-badge{background:var(--accent-dim);color:var(--accent);border-color:rgba(200,184,154,.24)}
+.ghost-btn,.theme-toggle{
+  border:1px solid var(--border2);background:transparent;color:var(--text);
+  padding:6px 10px;border-radius:999px;font-size:.72rem;letter-spacing:.04em;
+  cursor:pointer;transition:border-color .2s,transform .12s
+}
+.ghost-btn:hover,.theme-toggle:hover{border-color:var(--accent);transform:translateY(-1px)}
+.ghost-btn:active,.theme-toggle:active{transform:translateY(0)}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--dot-off);transition:background .4s}
 .dot.on{background:#5a9e6f;box-shadow:0 0 8px rgba(90,158,111,.5)}
-
-/* Conversation */
 .conv{overflow-y:auto;padding:20px 0 8px;display:flex;flex-direction:column;gap:14px;scrollbar-width:none}
 .conv::-webkit-scrollbar{display:none}
-
 .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;opacity:.28;pointer-events:none;padding-bottom:80px}
 .empty-icon{width:44px;height:44px;border:1px solid var(--border);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px}
 .empty p{font-size:.82rem;color:var(--muted);text-align:center;line-height:1.7}
-
-/* Bulles */
 .bubble{max-width:84%;padding:12px 16px;line-height:1.68;font-size:.93rem;animation:pop .25s cubic-bezier(.34,1.56,.64,1) both}
 @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
-.bubble.user{align-self:flex-end;background:var(--surface2);border:1px solid var(--border2);border-bottom-right-radius:4px;border-radius:var(--radius);border-bottom-right-radius:4px}
+.bubble.user{align-self:flex-end;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius);border-bottom-right-radius:4px}
 .bubble.ai{align-self:flex-start;background:var(--ai-bg);border:1px solid var(--ai-border);border-radius:var(--radius);border-bottom-left-radius:4px}
 .bubble.ai .lbl{font-size:.68rem;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;font-weight:400}
 .bubble.err{align-self:center;background:var(--error-bg);border:1px solid var(--error-border);font-size:.82rem;color:var(--error-text);border-radius:var(--radius-sm);padding:7px 13px;max-width:90%}
-
-/* Typing indicator */
 .thinking{align-self:flex-start;display:flex;align-items:center;gap:9px;padding:11px 15px;background:var(--ai-bg);border:1px solid var(--ai-border);border-radius:var(--radius);border-bottom-left-radius:4px;animation:pop .25s both}
 .dots{display:flex;gap:4px}
 .dots span{width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.4;animation:dp 1.4s ease-in-out infinite}
@@ -68,11 +66,7 @@ header{display:flex;align-items:center;justify-content:space-between;border-bott
 .dots span:nth-child(3){animation-delay:.4s}
 @keyframes dp{0%,80%,100%{transform:scale(1);opacity:.4}40%{transform:scale(1.4);opacity:1}}
 .thinking-lbl{font-size:.76rem;color:var(--accent);font-style:italic}
-
-/* Barre du bas */
 .bottom{padding:12px 0 24px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
-
-/* Onde IA parle */
 .wave{display:none;align-items:center;justify-content:center;gap:3px;height:22px;margin-bottom:2px}
 .wave.on{display:flex}
 .wave .b{width:3px;border-radius:2px;background:var(--accent);animation:wb 1s ease-in-out infinite}
@@ -84,30 +78,24 @@ header{display:flex;align-items:center;justify-content:space-between;border-bott
 .wave .b:nth-child(6){height:18px;animation-delay:.15s}
 .wave .b:nth-child(7){height:12px;animation-delay:.25s}
 @keyframes wb{0%,100%{transform:scaleY(.5);opacity:.5}50%{transform:scaleY(1.3);opacity:1}}
-
-/* Zone de saisie */
 .input-row{display:flex;align-items:flex-end;gap:8px}
 .textarea-wrap{flex:1;position:relative}
 textarea{
   width:100%;min-height:44px;max-height:140px;
   background:var(--surface);border:1px solid var(--border2);
-  border-radius:var(--radius-sm);
-  color:var(--text);font-family:'DM Sans',sans-serif;font-size:.92rem;font-weight:300;
+  border-radius:var(--radius-sm);color:var(--text);
+  font-family:'DM Sans',sans-serif;font-size:.92rem;font-weight:300;
   padding:11px 14px;resize:none;outline:none;line-height:1.55;
-  transition:border-color .2s;overflow-y:auto;scrollbar-width:none;
+  transition:border-color .2s;overflow-y:auto;scrollbar-width:none
 }
 textarea::-webkit-scrollbar{display:none}
 textarea::placeholder{color:var(--muted)}
 textarea:focus{border-color:rgba(200,184,154,.35)}
-
-/* Boutons d'action */
 .action-btns{display:flex;gap:6px;align-items:flex-end}
-
 .btn-round{
   width:44px;height:44px;border-radius:50%;border:1.5px solid var(--border2);
   background:var(--surface);cursor:pointer;display:flex;align-items:center;justify-content:center;
-  transition:border-color .2s,background .2s,transform .12s;outline:none;flex-shrink:0;
-  color:var(--text);
+  transition:border-color .2s,background .2s,transform .12s;outline:none;flex-shrink:0;color:var(--text)
 }
 .btn-round:hover{border-color:var(--accent);transform:scale(1.05)}
 .btn-round:active{transform:scale(.94)}
@@ -115,8 +103,6 @@ textarea:focus{border-color:rgba(200,184,154,.35)}
 .btn-round.send{background:var(--accent-dim);border-color:var(--accent)}
 .btn-round.send:hover{background:rgba(200,184,154,.25)}
 .btn-round:disabled{opacity:.3;cursor:default;transform:none}
-
-/* Anneau micro pulsation */
 .mic-wrap{position:relative;display:flex;align-items:center;justify-content:center}
 .ring{position:absolute;border-radius:50%;border:1px solid var(--accent);opacity:0;pointer-events:none}
 .r1{width:58px;height:58px}.r2{width:72px;height:72px}
@@ -126,22 +112,26 @@ textarea:focus{border-color:rgba(200,184,154,.35)}
 .proc-ring{position:absolute;width:52px;height:52px;border-radius:50%;border:1.5px solid transparent;border-top-color:var(--accent);border-right-color:rgba(200,184,154,.3);opacity:0;transition:opacity .3s;pointer-events:none}
 .mic-wrap.proc .proc-ring{opacity:1;animation:spin 1.1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-
-/* Barre du bas – rangée outils */
 .tools-row{display:flex;align-items:center;gap:10px}
 .upload-lbl{display:flex;align-items:center;gap:5px;font-size:.75rem;color:var(--muted);cursor:pointer;opacity:.5;transition:opacity .2s;user-select:none}
 .upload-lbl:hover{opacity:.85}
 .upload-lbl input{display:none}
 .hint{font-size:.75rem;color:var(--muted);margin-left:auto}
 #audio-player{display:none}
+@media (max-width:760px){
+  .header-actions{gap:7px}
+  .session-badge,.memory-badge,.ghost-btn,.theme-toggle{font-size:.66rem;padding:5px 8px}
+}
 </style>
 </head>
 <body>
 <div class="app">
-
   <header>
     <div class="brand">Vocal <em>IA</em></div>
     <div class="header-actions">
+      <div class="memory-badge" id="memory-badge">Memoire active</div>
+      <div class="session-badge" id="session-usage">0 / 50 messages</div>
+      <button class="ghost-btn" id="new-chat-btn" type="button">Nouvelle discussion</button>
       <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Mode sombre</button>
       <div class="dot" id="dot"></div>
     </div>
@@ -149,13 +139,12 @@ textarea:focus{border-color:rgba(200,184,154,.35)}
 
   <div class="conv" id="conv">
     <div class="empty" id="empty">
-      <div class="empty-icon">◎</div>
-      <p>Écrivez ou parlez.<br/>L'IA vous répond à voix haute.</p>
+      <div class="empty-icon">O</div>
+      <p>Ecrivez ou parlez.<br/>L'IA vous repond a voix haute.</p>
     </div>
   </div>
 
   <div class="bottom">
-
     <div class="wave" id="wave">
       <div class="b"></div><div class="b"></div><div class="b"></div>
       <div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div>
@@ -163,16 +152,14 @@ textarea:focus{border-color:rgba(200,184,154,.35)}
 
     <div class="input-row">
       <div class="textarea-wrap">
-        <textarea id="txt" placeholder="Écrivez un message…" rows="1"></textarea>
+        <textarea id="txt" placeholder="Ecrivez un message..." rows="1"></textarea>
       </div>
       <div class="action-btns">
-        <!-- Bouton envoyer texte -->
         <button class="btn-round send" id="send-btn" title="Envoyer" disabled>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
           </svg>
         </button>
-        <!-- Bouton micro -->
         <div class="mic-wrap" id="mic-wrap">
           <div class="ring r1"></div><div class="ring r2"></div>
           <div class="proc-ring"></div>
@@ -196,29 +183,73 @@ textarea:focus{border-color:rgba(200,184,154,.35)}
         Fichier audio
         <input type="file" id="audio-file" accept="audio/*"/>
       </label>
-      <span class="hint" id="hint">Appuyez sur le micro ou écrivez</span>
+      <span class="hint" id="hint">Appuyez sur le micro ou ecrivez</span>
     </div>
-
   </div>
 </div>
 
 <audio id="audio-player" autoplay></audio>
 
 <script>
-const SESSION_ID = "s-" + Math.random().toString(36).slice(2,9);
+const STORAGE_KEYS = { sessionId: "vocal-ia-session-id", theme: "theme" };
 const TIMEOUT_MS = 120000;
+const SESSION_LIMIT_FALLBACK = 50;
 
 const $ = id => document.getElementById(id);
 const dom = {
-  conv: $("conv"), empty: $("empty"), dot: $("dot"),
-  txt: $("txt"), sendBtn: $("send-btn"),
-  micWrap: $("mic-wrap"), micBtn: $("mic-btn"),
-  audioFile: $("audio-file"), player: $("audio-player"),
-  wave: $("wave"), hint: $("hint"), themeToggle: $("theme-toggle"),
+  conv: $("conv"),
+  empty: $("empty"),
+  dot: $("dot"),
+  txt: $("txt"),
+  sendBtn: $("send-btn"),
+  micWrap: $("mic-wrap"),
+  micBtn: $("mic-btn"),
+  audioFile: $("audio-file"),
+  player: $("audio-player"),
+  wave: $("wave"),
+  hint: $("hint"),
+  themeToggle: $("theme-toggle"),
+  sessionUsage: $("session-usage"),
+  memoryBadge: $("memory-badge"),
+  newChatBtn: $("new-chat-btn"),
+};
+const EMPTY_TEMPLATE = dom.conv.innerHTML;
+
+const session = {
+  id: loadOrCreateSessionId(),
+  state: {
+    message_limit: SESSION_LIMIT_FALLBACK,
+    messages_used: 0,
+    messages_remaining: SESSION_LIMIT_FALLBACK,
+    preferred_title: null,
+    suggested_greeting: "Bonjour",
+  },
 };
 
+let rec = false;
+let proc = false;
+let speaking = false;
+let mr = null;
+let chunks = [];
+
+function createSessionId(){
+  return "s-" + Math.random().toString(36).slice(2, 10);
+}
+
+function loadOrCreateSessionId(){
+  const stored = localStorage.getItem(STORAGE_KEYS.sessionId);
+  if (stored) return stored;
+  const created = createSessionId();
+  localStorage.setItem(STORAGE_KEYS.sessionId, created);
+  return created;
+}
+
+function persistSessionId(){
+  localStorage.setItem(STORAGE_KEYS.sessionId, session.id);
+}
+
 function getPreferredTheme(){
-  const stored = localStorage.getItem("theme");
+  const stored = localStorage.getItem(STORAGE_KEYS.theme);
   if (stored === "light" || stored === "dark") return stored;
   if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
   return "dark";
@@ -227,212 +258,362 @@ function getPreferredTheme(){
 function setTheme(theme){
   const next = theme === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
-  localStorage.setItem("theme", next);
-  if (dom.themeToggle){
-    dom.themeToggle.textContent = next === "dark" ? "Mode clair" : "Mode sombre";
-    dom.themeToggle.setAttribute("aria-pressed", next === "dark" ? "true" : "false");
-  }
+  localStorage.setItem(STORAGE_KEYS.theme, next);
+  dom.themeToggle.textContent = next === "dark" ? "Mode clair" : "Mode sombre";
+  dom.themeToggle.setAttribute("aria-pressed", next === "dark" ? "true" : "false");
 }
 
-if (dom.themeToggle){
-  setTheme(getPreferredTheme());
-  dom.themeToggle.addEventListener("click", () => {
-    const current = document.documentElement.dataset.theme || "dark";
-    setTheme(current === "dark" ? "light" : "dark");
-  });
+function capitalize(value){
+  if (!value) return "";
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-let rec = false, proc = false, mr = null, chunks = [];
+function escHtml(text){
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
-// Health
-fetch("/health").then(r => r.ok && dom.dot.classList.add("on")).catch(()=>{});
+function hideEmpty(){
+  if (dom.empty) dom.empty.style.display = "none";
+}
 
-// Auto-resize textarea
-dom.txt.addEventListener("input", () => {
-  dom.txt.style.height = "auto";
-  dom.txt.style.height = Math.min(dom.txt.scrollHeight, 140) + "px";
-  dom.sendBtn.disabled = !dom.txt.value.trim() || proc;
-});
-
-// Entrée = envoyer (Shift+Entrée = saut de ligne)
-dom.txt.addEventListener("keydown", e => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!dom.sendBtn.disabled) sendText(); }
-});
-
-function hideEmpty(){ dom.empty.style.display = "none"; }
+function resetConversationUi(){
+  dom.conv.innerHTML = EMPTY_TEMPLATE;
+  dom.empty = $("empty");
+}
 
 function addBubble(role, text){
   hideEmpty();
-  const d = document.createElement("div");
-  if(role === "user"){
-    d.className = "bubble user"; d.textContent = text;
-  } else if(role === "ai"){
-    d.className = "bubble ai";
-    d.innerHTML = `<div class="lbl">Assistant</div><div>${escHtml(text)}</div>`;
+  const bubble = document.createElement("div");
+  if (role === "user"){
+    bubble.className = "bubble user";
+    bubble.textContent = text;
+  } else if (role === "ai"){
+    bubble.className = "bubble ai";
+    bubble.innerHTML = `<div class="lbl">Assistant</div><div>${escHtml(text)}</div>`;
   } else {
-    d.className = "bubble err"; d.textContent = text;
+    bubble.className = "bubble err";
+    bubble.textContent = text;
   }
-  dom.conv.appendChild(d);
-  d.scrollIntoView({behavior:"smooth",block:"end"});
-  return d;
+  dom.conv.appendChild(bubble);
+  bubble.scrollIntoView({ behavior: "smooth", block: "end" });
+  return bubble;
 }
-
-function escHtml(t){ return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
 function addThinking(){
   hideEmpty();
-  const d = document.createElement("div");
-  d.className = "thinking";
-  d.innerHTML = `<div class="dots"><span></span><span></span><span></span></div><span class="thinking-lbl">réflexion…</span>`;
-  dom.conv.appendChild(d);
-  d.scrollIntoView({behavior:"smooth",block:"end"});
-  return d;
+  const bubble = document.createElement("div");
+  bubble.className = "thinking";
+  bubble.innerHTML = `<div class="dots"><span></span><span></span><span></span></div><span class="thinking-lbl">reflexion...</span>`;
+  dom.conv.appendChild(bubble);
+  bubble.scrollIntoView({ behavior: "smooth", block: "end" });
+  return bubble;
 }
 
-function setHint(t){ dom.hint.textContent = t; }
+function updateTextareaHeight(){
+  dom.txt.style.height = "auto";
+  dom.txt.style.height = Math.min(dom.txt.scrollHeight, 140) + "px";
+}
+
+function renderHint(){
+  if (proc) {
+    dom.hint.textContent = "Traitement en cours...";
+    return;
+  }
+  if (rec) {
+    dom.hint.textContent = "En ecoute - cliquez a nouveau pour envoyer";
+    return;
+  }
+  if (speaking) {
+    dom.hint.textContent = "L'assistant repond...";
+    return;
+  }
+  if (session.state.messages_remaining <= 0) {
+    dom.hint.textContent = "Limite atteinte pour cette discussion. Lancez une nouvelle discussion.";
+    return;
+  }
+  dom.hint.textContent = session.state.preferred_title
+    ? `Memoire active avec ${capitalize(session.state.preferred_title)}`
+    : "Appuyez sur le micro ou ecrivez";
+}
+
+function syncActionState(){
+  const limitReached = session.state.messages_remaining <= 0;
+  dom.sendBtn.disabled = proc || limitReached || !dom.txt.value.trim();
+  dom.micBtn.disabled = proc || limitReached;
+}
+
+function renderSessionState(){
+  const limit = Number.isFinite(session.state.message_limit) ? session.state.message_limit : SESSION_LIMIT_FALLBACK;
+  const used = Number.isFinite(session.state.messages_used) ? session.state.messages_used : 0;
+  const remaining = Number.isFinite(session.state.messages_remaining)
+    ? session.state.messages_remaining
+    : Math.max(limit - used, 0);
+  session.state.message_limit = limit;
+  session.state.messages_used = used;
+  session.state.messages_remaining = remaining;
+  dom.sessionUsage.textContent = `${used} / ${limit} messages`;
+  dom.memoryBadge.textContent = session.state.preferred_title
+    ? `Memoire active - ${capitalize(session.state.preferred_title)}`
+    : "Memoire active";
+  renderHint();
+  syncActionState();
+}
+
+function applySessionPayload(payload){
+  if (!payload || typeof payload !== "object") return;
+  const nextState = { ...session.state };
+  if (typeof payload.message_limit === "number") nextState.message_limit = payload.message_limit;
+  if (typeof payload.messages_used === "number") nextState.messages_used = payload.messages_used;
+  if (typeof payload.messages_remaining === "number") nextState.messages_remaining = payload.messages_remaining;
+  if (typeof payload.preferred_title === "string" || payload.preferred_title === null) {
+    nextState.preferred_title = payload.preferred_title;
+  }
+  if (typeof payload.suggested_greeting === "string") nextState.suggested_greeting = payload.suggested_greeting;
+  session.state = nextState;
+  renderSessionState();
+}
+
+async function refreshSessionState(){
+  try{
+    const response = await fetch(`/session/${encodeURIComponent(session.id)}`);
+    if (!response.ok) return;
+    const payload = await response.json();
+    applySessionPayload(payload);
+  } catch (_error) {
+    renderSessionState();
+  }
+}
+
+async function restoreConversationHistory(){
+  try{
+    const response = await fetch(`/session/${encodeURIComponent(session.id)}/history`);
+    if (!response.ok) return;
+    const payload = await response.json();
+    resetConversationUi();
+    for (const message of payload.messages || []){
+      addBubble(message.role === "assistant" ? "ai" : "user", message.content || "");
+    }
+  } catch (_error) {
+    resetConversationUi();
+  }
+}
+
+function resetSessionState(){
+  session.state = {
+    message_limit: SESSION_LIMIT_FALLBACK,
+    messages_used: 0,
+    messages_remaining: SESSION_LIMIT_FALLBACK,
+    preferred_title: null,
+    suggested_greeting: "Bonjour",
+  };
+  renderSessionState();
+}
+
+async function startNewConversation(){
+  if (proc) return;
+  session.id = createSessionId();
+  persistSessionId();
+  resetConversationUi();
+  resetSessionState();
+  setSpeaking(false);
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  dom.player.pause();
+  dom.player.removeAttribute("src");
+  dom.player.load();
+  await refreshSessionState();
+}
 
 function setProc(on){
   proc = on;
   dom.micWrap.classList.toggle("proc", on);
-  dom.sendBtn.disabled = on || !dom.txt.value.trim();
-  dom.micBtn.disabled = on;
-  setHint(on ? "Traitement en cours…" : "Appuyez sur le micro ou écrivez");
+  renderHint();
+  syncActionState();
 }
 
 function setSpeaking(on){
+  speaking = on;
   dom.wave.classList.toggle("on", on);
-  setHint(on ? "L'assistant répond…" : "Appuyez sur le micro ou écrivez");
+  renderHint();
 }
 
-function b64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=()=>rej(new Error("Lecture échouée")); r.readAsDataURL(blob); }); }
+function b64(blob){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = () => reject(new Error("Lecture echouee"));
+    reader.readAsDataURL(blob);
+  });
+}
 
-// ── Lecture vocale d'un texte via /chat ──
 async function speakText(text){
-  // On utilise l'API Web Speech si disponible (plus rapide, pas besoin de Piper)
-  // Sinon on passe par l'endpoint /voice avec le texte encodé
-  if("speechSynthesis" in window){
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = "fr-FR";
-    utt.rate = 0.95;
-    // Chercher une voix française
-    const voices = speechSynthesis.getVoices();
-    const fr = voices.find(v => v.lang.startsWith("fr"));
-    if(fr) utt.voice = fr;
-    setSpeaking(true);
-    utt.onend = () => setSpeaking(false);
-    utt.onerror = () => setSpeaking(false);
-    speechSynthesis.speak(utt);
-  }
+  if (!("speechSynthesis" in window) || !text) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "fr-FR";
+  utterance.rate = 0.95;
+  const voices = speechSynthesis.getVoices();
+  const frVoice = voices.find(voice => voice.lang.startsWith("fr"));
+  if (frVoice) utterance.voice = frVoice;
+  setSpeaking(true);
+  utterance.onend = () => setSpeaking(false);
+  utterance.onerror = () => setSpeaking(false);
+  speechSynthesis.speak(utterance);
 }
 
-// ── Lecture audio Piper (depuis /voice) ──
 function playAudio(base64){
-  if(!base64 || base64.length < 100) return false;
+  if (!base64 || base64.length < 100) return false;
   setSpeaking(true);
   dom.player.src = `data:audio/wav;base64,${base64}`;
   dom.player.load();
   dom.player.onended = () => setSpeaking(false);
   dom.player.onerror = () => setSpeaking(false);
-  dom.player.oncanplaythrough = () => dom.player.play().catch(()=>setSpeaking(false));
+  dom.player.oncanplaythrough = () => dom.player.play().catch(() => setSpeaking(false));
   return true;
 }
 
-// ── Envoi texte via /chat ──
 async function sendText(){
   const text = dom.txt.value.trim();
-  if(!text || proc) return;
-  dom.txt.value = ""; dom.txt.style.height = "auto"; dom.sendBtn.disabled = true;
+  if (!text || proc || session.state.messages_remaining <= 0) return;
+  dom.txt.value = "";
+  updateTextareaHeight();
   addBubble("user", text);
-  const th = addThinking();
+  const thinking = addThinking();
   setProc(true);
   try{
-    const ctrl = new AbortController();
-    const t = setTimeout(()=>ctrl.abort(), TIMEOUT_MS);
-    const r = await fetch("/chat", {
-      method:"POST", signal:ctrl.signal,
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({session_id:SESSION_ID, text}),
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const response = await fetch("/chat", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: session.id, text }),
     });
-    clearTimeout(t);
-    const p = await r.json();
-    th.remove();
-    if(!r.ok) throw new Error(p.detail || `Erreur ${r.status}`);
-    addBubble("ai", p.response || "(pas de réponse)");
-    // Lecture vocale de la réponse
-    await speakText(p.response || "");
-  } catch(e){
-    th.remove();
-    addBubble("err", e.name==="AbortError" ? "Délai dépassé." : `Erreur : ${e.message}`);
-  } finally { setProc(false); }
+    clearTimeout(timeoutId);
+    const payload = await response.json().catch(() => ({}));
+    thinking.remove();
+    if (!response.ok) throw new Error(payload.detail || `Erreur ${response.status}`);
+    applySessionPayload(payload);
+    addBubble("ai", payload.response || "(pas de reponse)");
+    await speakText(payload.response || "");
+  } catch (error) {
+    thinking.remove();
+    await refreshSessionState();
+    addBubble("err", error.name === "AbortError" ? "Delai depasse." : `Erreur : ${error.message}`);
+  } finally {
+    setProc(false);
+  }
 }
+
+async function sendAudio(blob, label){
+  if (proc || session.state.messages_remaining <= 0) return;
+  addBubble("user", label);
+  const thinking = addThinking();
+  setProc(true);
+  try{
+    const audioBase64 = await b64(blob);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const response = await fetch("/voice", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: session.id, audio_base64: audioBase64 }),
+    });
+    clearTimeout(timeoutId);
+    const payload = await response.json().catch(() => ({}));
+    thinking.remove();
+    if (!response.ok) throw new Error(payload.detail || `Erreur ${response.status}`);
+    applySessionPayload(payload);
+    addBubble("ai", payload.text || "(pas de reponse)");
+    if (!playAudio(payload.audio_base64)) await speakText(payload.text || "");
+  } catch (error) {
+    thinking.remove();
+    await refreshSessionState();
+    addBubble(
+      "err",
+      error.name === "AbortError" ? "Delai depasse - l'IA met trop de temps." : `Erreur : ${error.message}`,
+    );
+  } finally {
+    setProc(false);
+  }
+}
+
+dom.txt.addEventListener("input", () => {
+  updateTextareaHeight();
+  syncActionState();
+});
+
+dom.txt.addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    if (!dom.sendBtn.disabled) sendText();
+  }
+});
 
 dom.sendBtn.addEventListener("click", sendText);
+dom.newChatBtn.addEventListener("click", startNewConversation);
 
-// ── Envoi audio via /voice ──
-async function sendAudio(blob, label){
-  if(proc) return;
-  addBubble("user", label);
-  const th = addThinking();
-  setProc(true);
-  try{
-    const a64 = await b64(blob);
-    const ctrl = new AbortController();
-    const t = setTimeout(()=>ctrl.abort(), TIMEOUT_MS);
-    const r = await fetch("/voice", {
-      method:"POST", signal:ctrl.signal,
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({session_id:SESSION_ID, audio_base64:a64}),
-    });
-    clearTimeout(t);
-    const p = await r.json();
-    th.remove();
-    if(!r.ok) throw new Error(p.detail || `Erreur ${r.status}`);
-    addBubble("ai", p.text || "(pas de réponse)");
-    // Audio Piper en priorité, sinon Web Speech
-    if(!playAudio(p.audio_base64)) await speakText(p.text || "");
-  } catch(e){
-    th.remove();
-    addBubble("err", e.name==="AbortError" ? "Délai dépassé — l'IA met trop de temps." : `Erreur : ${e.message}`);
-  } finally { setProc(false); }
-}
-
-// ── Microphone ──
 dom.micBtn.addEventListener("click", async () => {
-  if(proc) return;
-  if(!rec){
+  if (proc || session.state.messages_remaining <= 0) return;
+  if (!rec) {
     try{
-      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       chunks = [];
       mr = new MediaRecorder(stream);
-      mr.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
-      mr.onstop = async () => {
-        stream.getTracks().forEach(t=>t.stop());
-        const blob = new Blob(chunks, {type:chunks[0]?.type||"audio/webm"});
-        if(blob.size < 100){ setHint("Appuyez sur le micro ou écrivez"); return; }
-        await sendAudio(blob, "🎤 Message vocal");
+      mr.ondataavailable = event => {
+        if (event.data.size > 0) chunks.push(event.data);
       };
-      mr.start(); rec = true;
+      mr.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        const blob = new Blob(chunks, { type: chunks[0]?.type || "audio/webm" });
+        rec = false;
+        dom.micWrap.classList.remove("rec");
+        renderHint();
+        if (blob.size < 100) return;
+        await sendAudio(blob, "Message vocal");
+      };
+      mr.start();
+      rec = true;
       dom.micWrap.classList.add("rec");
-      setHint("En écoute — cliquez pour envoyer");
-    } catch(e){ addBubble("err","Microphone inaccessible. Vérifiez les permissions."); }
+      renderHint();
+    } catch (_error) {
+      addBubble("err", "Microphone inaccessible. Verifiez les permissions.");
+    }
   } else {
     rec = false;
     dom.micWrap.classList.remove("rec");
+    renderHint();
     mr?.stop();
   }
 });
 
-// ── Upload fichier ──
 dom.audioFile.addEventListener("change", async () => {
-  const f = dom.audioFile.files?.[0];
-  if(!f) return;
+  const file = dom.audioFile.files?.[0];
+  if (!file) return;
   dom.audioFile.value = "";
-  await sendAudio(f, `📎 ${f.name}`);
+  await sendAudio(file, `Fichier audio : ${file.name}`);
 });
 
-// Charger les voix Web Speech
-if("speechSynthesis" in window) speechSynthesis.getVoices();
-window.speechSynthesis?.addEventListener?.("voiceschanged", ()=>speechSynthesis.getVoices());
+setTheme(getPreferredTheme());
+dom.themeToggle.addEventListener("click", () => {
+  const current = document.documentElement.dataset.theme || "dark";
+  setTheme(current === "dark" ? "light" : "dark");
+});
+
+fetch("/health").then(response => {
+  if (response.ok) dom.dot.classList.add("on");
+}).catch(() => {});
+
+if ("speechSynthesis" in window) speechSynthesis.getVoices();
+window.speechSynthesis?.addEventListener?.("voiceschanged", () => speechSynthesis.getVoices());
+
+async function init(){
+  resetSessionState();
+  await Promise.all([refreshSessionState(), restoreConversationHistory()]);
+  renderSessionState();
+}
+
+init();
 </script>
 </body>
 </html>

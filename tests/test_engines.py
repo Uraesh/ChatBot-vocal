@@ -7,6 +7,7 @@ import pytest
 from nosql_project.config import Settings
 from nosql_project.engines import (
     HybridNlpEngine,
+    OpenRouterNlpEngine,
     Phi3NlpEngine,
     PiperTtsEngine,
     RuleBasedNlpEngine,
@@ -60,6 +61,21 @@ def test_create_nlp_engine_phi3() -> None:
     assert engine.max_new_tokens == 80
     assert engine.temperature == 0.4
     assert engine.n_threads == 4
+
+
+def test_create_nlp_engine_openrouter() -> None:
+    """Factory should build the OpenRouter NLP engine."""
+    settings = Settings(
+        nlp_backend="openrouter",
+        openrouter_api_key="test-key",
+        openrouter_model="openrouter/free",
+        openrouter_site_url="https://example.com",
+        openrouter_app_name="Demo",
+    )
+    engine = create_nlp_engine(settings)
+    assert isinstance(engine, OpenRouterNlpEngine)
+    assert engine.api_key == "test-key"
+    assert engine.model == "openrouter/free"
 
 
 def test_create_nlp_engine_invalid_backend() -> None:
