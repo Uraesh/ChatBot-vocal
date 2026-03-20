@@ -37,7 +37,7 @@ def test_root_web_interface(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "Chatbot vocal IA" in response.text
+    assert "Vocal IA" in response.text
 
 
 def test_chat_endpoint(client: TestClient) -> None:

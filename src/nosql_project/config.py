@@ -22,7 +22,7 @@ class Settings:
 
     app_name: str = "NoSQL Async Voice Chatbot"
     queue_max_size: int = 128
-    voice_timeout_seconds: float = 120.0      # augmenté : Phi-3 est plus lent que Flan-T5
+    voice_timeout_seconds: float = 120.0
     default_language: str = "fr"
     debug: bool = False
     subtitles_file_path: str = "Fr/fr.txt"
@@ -38,14 +38,13 @@ class Settings:
     interactions_memory_max_records: int = 10000
     interactions_export_limit: int = 50000
 
-    # --- NLP (Phi-3 Mini GGUF) ---
+    # --- NLP ---
     nlp_backend: str = "rule_based"
-    nlp_model_name: str = "google/flan-t5-small"   # conservé pour backend transformers
-    nlp_model_path: str = ""                        # NOUVEAU : chemin vers le .gguf Phi-3
+    nlp_model_name: str = "google/flan-t5-small"
+    nlp_model_path: str = ""
     nlp_max_new_tokens: int = 400
-    nlp_num_beams: int = 4                          # utilisé uniquement par transformers
     nlp_temperature: float = 0.7
-    nlp_n_threads: int = 3                          # NOUVEAU : threads CPU pour llama.cpp
+    nlp_n_threads: int = 3
     nlp_local_files_only: bool = False
     nlp_fallback_to_rule_based: bool = True
     openrouter_api_key: str = ""
@@ -54,17 +53,19 @@ class Settings:
     openrouter_app_name: str = ""
     openrouter_timeout_seconds: float = 30.0
 
-    # --- STT (Whisper) ---
+    # --- STT ---
     stt_backend: str = "simple"
-    stt_model_size: str = "base"                    # "base" recommandé pour le français
+    stt_model_size: str = "base"
     stt_device: str = "cpu"
     stt_compute_type: str = "int8"
-    stt_beam_size: int = 5                          # 5 pour meilleure précision (était 1)
+    stt_beam_size: int = 5
     stt_fallback_to_simple: bool = True
 
-    # --- TTS (Piper) ---
+    # --- TTS ---
     tts_backend: str = "simple"
-    tts_piper_executable: str = r"D:\Licience 3 IA-BD\No sql\NoSql Project\tools\piper\piper\piper.exe"
+    tts_piper_executable: str = (
+        r"D:\Licience 3 IA-BD\No sql\NoSql Project\tools\piper\piper\piper.exe"
+    )
     tts_piper_model_path: str = ""
     tts_piper_speaker_id: int = -1
     tts_fallback_to_simple: bool = True
@@ -83,7 +84,6 @@ class Settings:
         )
         interactions_export_limit_raw = os.getenv("INTERACTIONS_EXPORT_LIMIT", "50000")
         nlp_max_tokens_raw = os.getenv("NLP_MAX_NEW_TOKENS", "400")
-        nlp_num_beams_raw = os.getenv("NLP_NUM_BEAMS", "4")
         nlp_temperature_raw = os.getenv("NLP_TEMPERATURE", "0.7")
         nlp_n_threads_raw = os.getenv("NLP_N_THREADS", "3")
         stt_beam_size_raw = os.getenv("STT_BEAM_SIZE", "5")
@@ -117,7 +117,6 @@ class Settings:
             nlp_model_name=os.getenv("NLP_MODEL_NAME", "google/flan-t5-small"),
             nlp_model_path=os.getenv("NLP_MODEL_PATH", ""),
             nlp_max_new_tokens=int(nlp_max_tokens_raw),
-            nlp_num_beams=int(nlp_num_beams_raw),
             nlp_temperature=float(nlp_temperature_raw),
             nlp_n_threads=int(nlp_n_threads_raw),
             nlp_local_files_only=_as_bool(
@@ -140,11 +139,13 @@ class Settings:
                 os.getenv("STT_FALLBACK_TO_SIMPLE", "true"), default=True,
             ),
             tts_backend=os.getenv("TTS_BACKEND", "simple"),
-            tts_piper_executable=os.getenv("TTS_PIPER_EXECUTABLE", r"D:\Licience 3 IA-BD\No sql\NoSql Project\tools\piper\piper\piper.exe"),
+            tts_piper_executable=os.getenv(
+                "TTS_PIPER_EXECUTABLE",
+                r"D:\Licience 3 IA-BD\No sql\NoSql Project\tools\piper\piper\piper.exe",
+            ),
             tts_piper_model_path=os.getenv("TTS_PIPER_MODEL_PATH", ""),
             tts_piper_speaker_id=int(tts_piper_speaker_id_raw),
             tts_fallback_to_simple=_as_bool(
                 os.getenv("TTS_FALLBACK_TO_SIMPLE", "true"), default=True,
             ),
         )
-    

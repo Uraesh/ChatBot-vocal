@@ -15,6 +15,7 @@ venv/
 # Editors / OS
 .idea/
 .vscode/
+.vs/
 *.swp
 Thumbs.db
 .DS_Store
@@ -27,3 +28,7 @@ Thumbs.db
 # Project heavy local data
 Fr/
 models/
+tools/
+
+# Local helper scripts
+check_env.py
